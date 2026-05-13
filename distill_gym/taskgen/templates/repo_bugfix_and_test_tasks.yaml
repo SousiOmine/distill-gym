@@ -1,0 +1,19 @@
+name: repo_bugfix_and_test
+description: Generate bugfix and test-improvement tasks from a git repository
+default_title: Repository maintenance task
+default_prompt: |
+  Inspect this repository, identify one concrete improvement or bug fix,
+  implement it, and run the most relevant tests. Keep the change focused.
+system_prompt: |
+  You are a senior software engineer. Generate concise, actionable coding-agent tasks.
+task_prompt: |
+  Generate {count} focused coding-agent tasks for this repository.
+  Return only JSON: an array of objects with id, title, prompt, and optional test_command.
+  Tasks must be solvable by editing the repository and should ask the agent to run tests when possible.
+
+  {context}
+context:
+  required:
+    - type: static
+      config:
+        value: "Repository context will be injected here."

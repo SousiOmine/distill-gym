@@ -3,6 +3,7 @@ import shlex
 from typing import Optional
 from distill_gym.harness.base import HarnessAdapter, HarnessResult
 from distill_gym.config.schema import TaskItem, HarnessConfig
+from distill_gym.registry.harness_registry import HarnessRegistry
 
 
 class _TaskFormat:
@@ -22,6 +23,7 @@ class _ShellString(str):
         return shlex.quote(str(self))
 
 
+@HarnessRegistry.register("generic_cli")
 class GenericCliHarnessAdapter(HarnessAdapter):
     name = "generic_cli"
 
@@ -42,6 +44,19 @@ class GenericCliHarnessAdapter(HarnessAdapter):
             )
         return kwargs
 
+    def _check_completion(self, exit_code: int, stdout: str, stderr: str) -> bool:
+        combined = (stdout or "") + "\n" + (stderr or "")
+
+        for pattern in self.config.completion.failure_patterns:
+            if pattern in combined:
+                return False
+
+        for pattern in self.config.completion.success_patterns:
+            if pattern in combined:
+                return True
+
+        return exit_code in self.config.completion.success_exit_codes
+
     async def install(self, sandbox: "SandboxManager") -> None:
         install_cfg = self.config.install
         for cmd in install_cfg.commands:
@@ -60,13 +75,16 @@ class GenericCliHarnessAdapter(HarnessAdapter):
             exit_code=exit_code,
             stdout=stdout,
             stderr=stderr,
-            success=exit_code in self.config.completion.success_exit_codes,
+            success=self._check_completion(exit_code, stdout, stderr),
         )
 
     def parse_result(self, process_result: dict) -> HarnessResult:
+        exit_code = process_result.get("exit_code", -1)
+        stdout = process_result.get("stdout", "")
+        stderr = process_result.get("stderr", "")
         return HarnessResult(
-            exit_code=process_result.get("exit_code", -1),
-            stdout=process_result.get("stdout", ""),
-            stderr=process_result.get("stderr", ""),
-            success=process_result.get("exit_code", -1) in self.config.completion.success_exit_codes,
+            exit_code=exit_code,
+            stdout=stdout,
+            stderr=stderr,
+            success=self._check_completion(exit_code, stdout, stderr),
         )

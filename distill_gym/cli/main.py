@@ -111,6 +111,32 @@ def proxy(
 
 
 @app.command()
+def merge(
+    run_ids: str = typer.Option(..., "--run-ids", help="Comma-separated run IDs to merge"),
+    format: str = typer.Option("openai-messages", "--format", help="Export format"),
+    output: str = typer.Option("merged.jsonl", "--output", help="Output file path"),
+):
+    """Merge multiple runs into a single dataset"""
+    async def _merge():
+        from distill_gym.exporters.merger import merge_runs_to_jsonl, merge_runs_to_chatml
+        store = RunStore()
+        try:
+            ids = [r.strip() for r in run_ids.split(",")]
+            output_path = Path(output)
+            if format == "openai-messages":
+                count = await merge_runs_to_jsonl(ids, output_path, store)
+            elif format == "chatml":
+                count = await merge_runs_to_chatml(ids, output_path, store)
+            else:
+                typer.echo(f"Unknown format: {format}", err=True)
+                raise typer.Exit(code=1)
+            typer.echo(f"Merged {count} conversations from {len(ids)} runs to {output_path}")
+        finally:
+            await store.close()
+    asyncio.run(_merge())
+
+
+@app.command()
 def export(
     run_id: str = typer.Option(..., "--run-id", help="Run ID to export"),
     format: str = typer.Option("openai-messages", "--format", help="Export format"),

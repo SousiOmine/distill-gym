@@ -3,8 +3,10 @@ import shlex
 from distill_gym.harness.generic_cli import GenericCliHarnessAdapter
 from distill_gym.harness.base import HarnessResult
 from distill_gym.config.schema import HarnessConfig
+from distill_gym.registry.harness_registry import HarnessRegistry
 
 
+@HarnessRegistry.register("qwen-code")
 class QwenCodeHarnessAdapter(GenericCliHarnessAdapter):
     name = "qwen-code"
     _default_command = "qwen --prompt {task.prompt.shell}"

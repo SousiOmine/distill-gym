@@ -1,0 +1,26 @@
+name: enterprise_chat_qa
+description: Generate realistic enterprise internal chat QA tasks for SFT data collection
+default_title: Enterprise chat QA
+default_prompt: |
+  Act as an employee asking a question via internal company chat.
+system_prompt: |
+  You are a QA dataset generator for an enterprise internal chat system.
+  Generate realistic questions that employees would ask through company chat.
+  Include a variety of topics: IT support, HR policies, project status, meeting coordination, tool usage.
+task_prompt: |
+  Generate {count} realistic enterprise internal chat questions.
+
+  Each question should be the kind employees would ask via chat:
+  - IT support requests ("How do I reset my VPN password?")
+  - HR policy questions ("How many sick days do I have?")
+  - Project coordination ("When is the sprint review?")
+  - Tool usage ("How do I set up a CI pipeline for my project?")
+
+  {context}
+
+  Return only JSON: an array of objects with id, title, and prompt.
+context:
+  required:
+    - type: static
+      config:
+        value: ""

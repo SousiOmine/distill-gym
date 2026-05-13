@@ -4,6 +4,10 @@ from pathlib import Path
 from distill_gym.cache.cache_store import get_git_mirror_dir
 
 
+_ENCODING = "utf-8"
+_ERRORS = "replace"
+
+
 def _mirror_name(repo_url: str) -> str:
     return hashlib.sha256(repo_url.encode()).hexdigest()[:16]
 
@@ -18,12 +22,14 @@ def ensure_mirror(repo_url: str) -> Path:
         subprocess.run(
             ["git", "-C", str(mirror_path), "remote", "update", "--prune"],
             capture_output=True, timeout=120,
+            encoding=_ENCODING, errors=_ERRORS,
         )
     else:
         mirror_path.parent.mkdir(parents=True, exist_ok=True)
         subprocess.run(
             ["git", "clone", "--mirror", repo_url, str(mirror_path)],
             capture_output=True, check=True, timeout=300,
+            encoding=_ENCODING, errors=_ERRORS,
         )
     return mirror_path
 
@@ -33,8 +39,10 @@ def clone_from_mirror(repo_url: str, target: Path, ref: str = "main") -> None:
     subprocess.run(
         ["git", "clone", str(mirror_path), str(target)],
         capture_output=True, check=True, timeout=120,
+        encoding=_ENCODING, errors=_ERRORS,
     )
     subprocess.run(
         ["git", "-C", str(target), "checkout", ref],
         capture_output=True, check=True, timeout=30,
+        encoding=_ENCODING, errors=_ERRORS,
     )

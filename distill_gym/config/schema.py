@@ -1,5 +1,5 @@
 from pydantic import BaseModel, Field
-from typing import Literal, Optional
+from typing import Any, Literal, Optional
 from enum import Enum
 
 
@@ -32,6 +32,14 @@ class SandboxNetwork(BaseModel):
     mode: SandboxNetworkMode = SandboxNetworkMode.proxy_only
 
 
+class BuildStep(BaseModel):
+    type: Literal[
+        "git_clone", "run", "pip_install", "apt_get",
+        "npm_install", "copy_file", "env_set", "mkdir",
+    ]
+    args: dict[str, Any] = Field(default_factory=dict)
+
+
 class SandboxConfig(BaseModel):
     type: str = "git_repository"
     engine: SandboxEngine = SandboxEngine.podman
@@ -41,6 +49,7 @@ class SandboxConfig(BaseModel):
     image: str = "docker.io/library/python:3.12-bookworm"
     workdir: str = "/workspace/repo"
     setup: list[str] = Field(default_factory=list)
+    steps: list[BuildStep] = Field(default_factory=list)
     volumes: list[SandboxVolume] = Field(default_factory=list)
     network: SandboxNetwork = Field(default_factory=SandboxNetwork)
     env: dict[str, str] = Field(default_factory=dict)
@@ -76,6 +85,8 @@ class HarnessRunConfig(BaseModel):
 class HarnessCompletionConfig(BaseModel):
     success_exit_codes: list[int] = Field(default_factory=lambda: [0])
     max_idle_seconds: int = 120
+    success_patterns: list[str] = Field(default_factory=list)
+    failure_patterns: list[str] = Field(default_factory=list)
 
 
 class HarnessConfig(BaseModel):

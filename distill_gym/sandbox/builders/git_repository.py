@@ -2,14 +2,16 @@ import hashlib
 from distill_gym.sandbox.base import SandboxSpec
 from distill_gym.sandbox.builders.base import SandboxBuilder
 from distill_gym.config.schema import SandboxConfig
+from distill_gym.registry.builder_registry import BuilderRegistry
 
 
+@BuilderRegistry.register("git_repository")
 class GitRepositorySandboxBuilder(SandboxBuilder):
     def build(self, config: SandboxConfig) -> SandboxSpec:
         volumes = []
         for v in config.volumes:
             vol = {"target": v.target}
-            if v.type == "bind":
+            if v.type == "bind" and v.source:
                 vol["source"] = v.source
                 vol["type"] = "bind"
             elif v.type == "volume" and v.name:
@@ -41,3 +43,9 @@ class GitRepositorySandboxBuilder(SandboxBuilder):
             source_url=config.repo_url,
             source_ref=config.ref,
         )
+
+    def validate(self, config: SandboxConfig) -> list[str]:
+        errors = super().validate(config)
+        if not config.repo_url:
+            errors.append("sandbox.repo_url is required for git_repository builder")
+        return errors

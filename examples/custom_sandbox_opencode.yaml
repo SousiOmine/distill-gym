@@ -1,0 +1,83 @@
+version: 1
+
+run:
+  name: custom-sandbox-run
+  task_count: 2
+  concurrency: 1
+  timeout_minutes_per_task: 30
+  cleanup: always
+
+provider:
+  type: openai_compatible
+  name: deepinfra
+  base_url: https://api.deepinfra.com/v1/openai
+  api_key_env: DEEPINFRA_API_KEY
+  model: deepseek-coder-v2
+
+logging_proxy:
+  listen_host: 127.0.0.1
+  listen_port: 5002
+  capture_stream_chunks: true
+  capture_raw_request: true
+  capture_raw_response: true
+  normalize_reasoning: true
+
+sandbox:
+  type: custom
+  engine: podman
+  image: docker.io/library/python:3.12-bookworm
+  workdir: /workspace
+  steps:
+    - type: git_clone
+      args:
+        repo: https://github.com/example/project.git
+        ref: main
+        dest: /workspace/repo
+    - type: apt_get
+      args:
+        packages: [git, curl]
+        update_first: true
+    - type: pip_install
+      args:
+        packages: [pytest, ruff]
+    - type: env_set
+      args:
+        key: PYTHONUNBUFFERED
+        value: "1"
+  volumes:
+    - type: cache
+      name: pip-cache
+      target: /root/.cache/pip
+  network:
+    mode: proxy_only
+
+harness:
+  type: opencode
+  install:
+    strategy: command
+    commands:
+      - npm install -g opencode-ai
+  run:
+    command: opencode run --format json {task.prompt.shell}
+  completion:
+    success_exit_codes: [0]
+    max_idle_seconds: 120
+
+taskgen:
+  type: repo_auto
+  prompt_template: repo_bugfix_and_test_tasks
+
+artifacts:
+  collect:
+    - git_diff
+    - stdout
+    - stderr
+    - test_results
+    - files_changed
+
+export:
+  formats:
+    - openai_messages_jsonl
+  include_reasoning_content: true
+  include_tool_results: true
+  include_failed_runs: false

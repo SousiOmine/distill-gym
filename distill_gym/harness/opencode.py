@@ -4,8 +4,10 @@ import shlex
 from distill_gym.harness.generic_cli import GenericCliHarnessAdapter
 from distill_gym.harness.base import HarnessResult
 from distill_gym.config.schema import HarnessConfig
+from distill_gym.registry.harness_registry import HarnessRegistry
 
 
+@HarnessRegistry.register("opencode")
 class OpencodeHarnessAdapter(GenericCliHarnessAdapter):
     name = "opencode"
     _default_command = "opencode run --format json {task.prompt.shell}"

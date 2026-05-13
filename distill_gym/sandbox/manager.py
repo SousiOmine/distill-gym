@@ -88,6 +88,98 @@ class SandboxManager:
         for cmd in config.setup:
             await self.checked_exec(cmd, timeout=900, context=f"sandbox setup command '{cmd}'")
 
+    async def execute_steps(self, spec: SandboxSpec) -> None:
+        for step in spec.steps:
+            step_type = step.get("type", "")
+            args = step.get("args", {})
+
+            if step_type == "git_clone":
+                repo = args.get("repo", "")
+                ref = args.get("ref", "main")
+                dest = args.get("dest", self.workdir)
+                quoted_dest = shlex.quote(dest)
+                await self.checked_exec(
+                    f"mkdir -p {shlex.quote(posixpath.dirname(dest))}",
+                    workdir="/", context="create git clone parent",
+                )
+                await self.checked_exec(
+                    "command -v git >/dev/null 2>&1 || "
+                    "(command -v apt-get >/dev/null 2>&1 && "
+                    "apt-get update && apt-get install -y git ca-certificates)",
+                    workdir="/", timeout=600, context="install git",
+                )
+                await self.checked_exec(
+                    f"git clone --branch {shlex.quote(ref)} --depth 1 {shlex.quote(repo)} {quoted_dest}",
+                    workdir="/", timeout=900, context=f"git clone {repo}",
+                )
+
+            elif step_type == "run":
+                command = args.get("command", "")
+                timeout = args.get("timeout", 300)
+                check = args.get("check", True)
+                if check:
+                    await self.checked_exec(command, timeout=timeout, context=f"step run: {command[:80]}")
+                else:
+                    await self.exec(command, timeout=timeout)
+
+            elif step_type == "pip_install":
+                packages = args.get("packages", [])
+                if packages:
+                    pkg_str = " ".join(shlex.quote(p) for p in packages)
+                    await self.checked_exec(
+                        f"pip install {pkg_str}",
+                        timeout=args.get("timeout", 600), context="pip install",
+                    )
+
+            elif step_type == "apt_get":
+                packages = args.get("packages", [])
+                if packages:
+                    pkg_str = " ".join(shlex.quote(p) for p in packages)
+                    cmd = "apt-get update && apt-get install -y " + pkg_str
+                    await self.checked_exec(cmd, timeout=args.get("timeout", 600), context="apt-get install")
+
+            elif step_type == "npm_install":
+                packages = args.get("packages", [])
+                if packages:
+                    is_global = args.get("global", True)
+                    flag = "-g" if is_global else ""
+                    pkg_str = " ".join(shlex.quote(p) for p in packages)
+                    await self.checked_exec(
+                        f"npm install {flag} {pkg_str}",
+                        timeout=args.get("timeout", 600), context="npm install",
+                    )
+
+            elif step_type == "copy_file":
+                source = args.get("source", "")
+                target = args.get("target", "")
+                if source and target:
+                    if self.temp_dir:
+                        host_path = self.temp_dir / source
+                        host_path.parent.mkdir(parents=True, exist_ok=True)
+                        host_path.write_text(args.get("content", ""), encoding="utf-8")
+                        await self.copy_to(str(host_path), target)
+                    else:
+                        quoted_target = shlex.quote(target)
+                        quoted_source = shlex.quote(source)
+                        await self.checked_exec(
+                            f"mkdir -p {shlex.quote(posixpath.dirname(target))}",
+                            workdir="/", context="create copy target dir",
+                        )
+
+            elif step_type == "mkdir":
+                path = args.get("path", "")
+                if path:
+                    await self.checked_exec(
+                        f"mkdir -p {shlex.quote(path)}",
+                        workdir="/", context=f"mkdir {path}",
+                    )
+
+            elif step_type == "env_set":
+                pass
+
+            else:
+                raise RuntimeError(f"Unknown build step type: {step_type}")
+
     async def copy_to(self, source: str, target: str) -> None:
         if not self.container_id:
             raise RuntimeError("Container not started")

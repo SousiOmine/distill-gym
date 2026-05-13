@@ -6,40 +6,28 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
-from distill_gym.config.schema import Config, CleanupPolicy, HarnessConfig
+from distill_gym.config.schema import Config, CleanupPolicy, HarnessConfig, ProviderConfig
 from distill_gym.orchestrator.run_plan import RunPlan
+from distill_gym.orchestrator.events import EventBus, get_event_bus
 from distill_gym.storage.run_store import RunStore
 from distill_gym.storage.models import TaskRecord, ArtifactRecord
 from distill_gym.proxy.recorder import TraceRecorder
 from distill_gym.proxy.app import create_proxy_app
-from distill_gym.harness.base import MockHarnessAdapter, HarnessAdapter
-from distill_gym.harness.generic_cli import GenericCliHarnessAdapter
-from distill_gym.harness.codex import CodexHarnessAdapter
-from distill_gym.harness.opencode import OpencodeHarnessAdapter
-from distill_gym.harness.qwen_code import QwenCodeHarnessAdapter
-from distill_gym.sandbox.base import SandboxSpec
-from distill_gym.sandbox.builders.git_repository import GitRepositorySandboxBuilder
+from distill_gym.registry.harness_registry import HarnessRegistry
+from distill_gym.registry.builder_registry import BuilderRegistry
 from distill_gym.sandbox.manager import SandboxManager
 from distill_gym.taskgen.harness_task_generator import HarnessTaskGenerator
 from distill_gym.collectors.artifact_collector import ArtifactCollector
 from distill_gym.collectors.git_diff import collect_git_diff, collect_changed_files
 from distill_gym.collectors.test_result import collect_test_result
-from distill_gym.cache.cache_store import get_artifacts_dir, get_cache_dir
-from distill_gym.storage.db import get_db
+from distill_gym.cache.cache_store import get_artifacts_dir
 
 import uvicorn
 import uuid
 
+from distill_gym.sandbox.runtimes import create_runtime
+
 logger = logging.getLogger(__name__)
-
-
-_handlers: dict[str, type[HarnessAdapter]] = {
-    "mock": MockHarnessAdapter,
-    "generic_cli": GenericCliHarnessAdapter,
-    "codex": CodexHarnessAdapter,
-    "opencode": OpencodeHarnessAdapter,
-    "qwen-code": QwenCodeHarnessAdapter,
-}
 
 
 async def _start_proxy(config: Config, recorder: TraceRecorder) -> tuple[uvicorn.Server, asyncio.Task]:
@@ -76,14 +64,16 @@ def _make_harness_from_config(
     harness_config: HarnessConfig,
     provider: Optional[ProviderConfig] = None,
     proxy_base_url: Optional[str] = None,
-) -> HarnessAdapter:
-    cls = _handlers.get(harness_config.type)
-    if cls is None:
-        raise ValueError(f"Unknown harness type: {harness_config.type}")
-    return cls(harness_config, provider=provider, proxy_base_url=proxy_base_url)
+):
+    return HarnessRegistry.create(
+        harness_config.type,
+        harness_config,
+        provider=provider,
+        proxy_base_url=proxy_base_url,
+    )
 
 
-def _make_harness(config: Config, **extra) -> HarnessAdapter:
+def _make_harness(config: Config, **extra):
     return _make_harness_from_config(config.harness, **extra)
 
 
@@ -94,6 +84,7 @@ def _needs_harness_taskgen(config: Config) -> bool:
 async def run(config: Config, dry_run: bool = False) -> str:
     plan = await RunPlan.from_config(config)
     store = RunStore()
+    event_bus = get_event_bus()
     await store.create_run(plan.to_run_record())
 
     tasks_registered = False
@@ -111,6 +102,7 @@ async def run(config: Config, dry_run: bool = False) -> str:
     proxy_server: Optional[uvicorn.Server] = None
     proxy_task: Optional[asyncio.Task] = None
     proxy_recorder: Optional[TraceRecorder] = None
+    created_network: str = ""
 
     try:
         needs_taskgen = _needs_harness_taskgen(config)
@@ -134,11 +126,25 @@ async def run(config: Config, dry_run: bool = False) -> str:
         )
 
         if needs_sandbox:
-            builder = GitRepositorySandboxBuilder()
+            builder = BuilderRegistry.create(config.sandbox.type)
+            errors = builder.validate(config.sandbox)
+            if errors:
+                raise ValueError(f"Sandbox config validation failed: {'; '.join(errors)}")
             spec = builder.build(config.sandbox)
+
+            if config.sandbox.network.mode.value == "proxy_only":
+                network_name = f"distill-gym-{plan.run_id}"
+                runtime = create_runtime(config.sandbox.engine.value)
+                runtime.client.network_create(network_name)
+                created_network = network_name
+                spec.network_name = network_name
+
             sandbox_manager = SandboxManager()
             await sandbox_manager.start(spec)
-            await sandbox_manager.prepare_git_repository(config.sandbox)
+            if spec.steps:
+                await sandbox_manager.execute_steps(spec)
+            else:
+                await sandbox_manager.prepare_git_repository(config.sandbox)
             commit_code, commit_stdout, _ = await sandbox_manager.exec("git rev-parse HEAD", timeout=30)
             if commit_code == 0:
                 await store.update_run(plan.run_id, commit_hash=commit_stdout.strip())
@@ -165,6 +171,7 @@ async def run(config: Config, dry_run: bool = False) -> str:
             await harness.install(sandbox_manager)
 
         await store.update_run(plan.run_id, status="running")
+        await event_bus.emit("run_started", run_id=plan.run_id)
 
         task_failed = False
         for task in plan.tasks:
@@ -173,6 +180,7 @@ async def run(config: Config, dry_run: bool = False) -> str:
                 db_task_id, status="running",
                 started_at=datetime.now(timezone.utc).isoformat(),
             )
+            await event_bus.emit("task_started", run_id=plan.run_id, task_id=task.id, title=task.title)
 
             try:
                 raw_trace_path = get_artifacts_dir() / plan.run_id / task.id / "raw_trace.jsonl"
@@ -253,6 +261,7 @@ async def run(config: Config, dry_run: bool = False) -> str:
                 ))
 
                 await store.update_task(db_task_id, status="completed", exit_code=result.exit_code, success=result.success)
+                await event_bus.emit("task_finished", run_id=plan.run_id, task_id=task.id, success=result.success)
 
             except Exception as task_e:
                 error_msg = f"Task '{task.id}' ({task.title}): {type(task_e).__name__}: {task_e}"
@@ -262,11 +271,13 @@ async def run(config: Config, dry_run: bool = False) -> str:
                     db_task_id, status="failed", error_message=error_msg,
                     finished_at=datetime.now(timezone.utc).isoformat(),
                 )
+                await event_bus.emit("task_failed", run_id=plan.run_id, task_id=task.id, error=error_msg)
                 task_failed = True
-                break  # Stop processing remaining tasks
+                break
 
         if task_failed:
             await store.update_run(plan.run_id, status="failed", success=False, error_message="One or more tasks failed")
+            await event_bus.emit("run_failed", run_id=plan.run_id)
         else:
             all_success = True
             tasks_db = await store.list_tasks(plan.run_id)
@@ -274,17 +285,25 @@ async def run(config: Config, dry_run: bool = False) -> str:
                 if t.success is not True:
                     all_success = False
                     break
-
             await store.update_run(plan.run_id, status="completed", success=all_success)
+            await event_bus.emit("run_completed", run_id=plan.run_id, success=all_success)
 
     except Exception as e:
         error_msg = f"{type(e).__name__}: {e}"
         logger.error(f"Run {plan.run_id} failed: {error_msg}", exc_info=True)
         print(f"[ERROR] Run failed: {error_msg}", file=sys.stderr)
         await store.update_run(plan.run_id, status="failed", success=False, error_message=error_msg)
+        await event_bus.emit("run_failed", run_id=plan.run_id, error=error_msg)
         raise RuntimeError(f"Run {plan.run_id}: {error_msg}") from e
 
     finally:
+        try:
+            if created_network and sandbox_manager:
+                runtime = create_runtime(config.sandbox.engine.value)
+                runtime.client.network_rm(created_network)
+        except Exception:
+            logger.warning(f"Failed to remove network {created_network}", exc_info=True)
+
         await _stop_proxy(proxy_server, proxy_task)
         if sandbox_manager and config.run.cleanup == CleanupPolicy.always:
             await sandbox_manager.destroy()

@@ -3,6 +3,7 @@ from dataclasses import dataclass
 from typing import Optional
 
 from distill_gym.config.schema import TaskItem, ProviderConfig, HarnessConfig
+from distill_gym.registry.harness_registry import HarnessRegistry
 
 
 @dataclass
@@ -40,6 +41,7 @@ class HarnessAdapter(ABC):
         ...
 
 
+@HarnessRegistry.register("mock")
 class MockHarnessAdapter(HarnessAdapter):
     name = "mock"
 

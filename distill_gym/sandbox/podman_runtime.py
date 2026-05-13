@@ -1,10 +1,11 @@
 from distill_gym.sandbox.base import SandboxSpec
-from distill_gym.sandbox.podman import PodmanClient
+from distill_gym.sandbox.clients.podman import PodmanClient
+from distill_gym.sandbox.clients import ContainerClient
 from distill_gym.sandbox.runtime import SandboxRuntime
 
 
 class PodmanSandboxRuntime(SandboxRuntime):
-    def __init__(self, client: PodmanClient | None = None):
+    def __init__(self, client: ContainerClient | None = None):
         self.client = client or PodmanClient()
 
     def start(self, spec: SandboxSpec) -> str:
