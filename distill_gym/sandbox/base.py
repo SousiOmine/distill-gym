@@ -13,3 +13,6 @@ class SandboxSpec:
     cmd: list[str] = field(default_factory=lambda: ["sleep", "infinity"])
     labels: dict[str, str] = field(default_factory=lambda: {"distill-gym": "true"})
     hostname: str = "distill-gym"
+    source_type: str = ""
+    source_url: str = ""
+    source_ref: str = ""

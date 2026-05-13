@@ -17,7 +17,12 @@ class RunPlan:
     @classmethod
     async def from_config(cls, config: Config) -> "RunPlan":
         run_id = f"run_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:6]}"
-        gen = RepoTaskGenerator(config.taskgen)
+        if config.taskgen.tasks:
+            return cls(run_id=run_id, config=config, tasks=config.taskgen.tasks[:config.run.task_count])
+        if config.taskgen.type == "harness":
+            return cls(run_id=run_id, config=config, tasks=[])
+
+        gen = RepoTaskGenerator(config.taskgen, config.sandbox, config.provider)
         tasks = await gen.generate(config.run.task_count)
         return cls(run_id=run_id, config=config, tasks=tasks)
 

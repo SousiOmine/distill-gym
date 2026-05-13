@@ -2,7 +2,7 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import Optional
 
-from distill_gym.config.schema import TaskItem
+from distill_gym.config.schema import TaskItem, ProviderConfig, HarnessConfig
 
 
 @dataclass
@@ -17,12 +17,22 @@ class HarnessResult:
 class HarnessAdapter(ABC):
     name: str = "base"
 
+    def __init__(
+        self,
+        config: Optional[HarnessConfig] = None,
+        provider: Optional[ProviderConfig] = None,
+        proxy_base_url: Optional[str] = None,
+    ):
+        self.config = config or HarnessConfig()
+        self.provider = provider
+        self.proxy_base_url = proxy_base_url
+
     @abstractmethod
     async def install(self, sandbox: "SandboxManager") -> None:
         ...
 
     @abstractmethod
-    async def run_task(self, sandbox: "SandboxManager", task: TaskItem, proxy_info: dict) -> HarnessResult:
+    async def run_task(self, sandbox: "SandboxManager", task: TaskItem) -> HarnessResult:
         ...
 
     @abstractmethod
@@ -36,7 +46,7 @@ class MockHarnessAdapter(HarnessAdapter):
     async def install(self, sandbox: "SandboxManager") -> None:
         pass
 
-    async def run_task(self, sandbox: "SandboxManager", task: TaskItem, proxy_info: dict) -> HarnessResult:
+    async def run_task(self, sandbox: "SandboxManager", task: TaskItem) -> HarnessResult:
         return HarnessResult(exit_code=0, stdout=f"mock output for {task.id}", stderr="", success=True)
 
     def parse_result(self, process_result: dict) -> HarnessResult:

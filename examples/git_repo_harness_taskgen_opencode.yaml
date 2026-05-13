@@ -1,0 +1,93 @@
+version: 1
+
+run:
+  name: harness-taskgen-opencode-run
+  task_count: 3
+  concurrency: 1
+  timeout_minutes_per_task: 30
+  cleanup: always
+
+provider:
+  type: openai_compatible
+  name: deepinfra
+  base_url: https://api.deepinfra.com/v1/openai
+  api_key_env: DEEPINFRA_API_KEY
+  model: example-model
+  extra_body: {}
+
+logging_proxy:
+  listen_host: 127.0.0.1
+  listen_port: 5002
+  capture_stream_chunks: true
+  capture_raw_request: true
+  capture_raw_response: true
+  normalize_reasoning: true
+
+sandbox:
+  type: git_repository
+  engine: podman
+  repo_url: https://github.com/example/project
+  ref: main
+  image: docker.io/library/python:3.12-bookworm
+  workdir: /workspace/repo
+  setup: []
+  network:
+    mode: proxy_only
+
+harness:
+  type: opencode
+  install:
+    strategy: command
+    commands:
+      - npm install -g opencode-ai
+  run:
+    command: opencode run --format json {task.prompt.shell}
+  completion:
+    success_exit_codes: [0]
+    max_idle_seconds: 120
+
+taskgen:
+  type: harness
+  output_file: .distill-gym/taskgen/tasks.json
+  batch_size: 2
+  max_rounds: 6
+  harness:
+    type: opencode
+    install:
+      strategy: command
+      commands:
+        - npm install -g opencode-ai
+    run:
+      command: opencode run --format json {task.prompt.shell}
+    completion:
+      success_exit_codes: [0]
+      max_idle_seconds: 120
+  prompts:
+    - id: bugfix
+      title: Bugfix tasks
+      prompt: |
+        Inspect this repository and generate up to {batch_size} concrete bugfix tasks.
+        Avoid duplicating these existing tasks: {existing_tasks_json}
+        Write only the JSON array to {output_file}.
+    - id: tests
+      title: Test coverage tasks
+      prompt: |
+        Inspect this repository and generate up to {batch_size} focused test-improvement tasks.
+        Include test_command when a clear project test command exists.
+        Avoid duplicating these existing tasks: {existing_tasks_json}
+        Write only the JSON array to {output_file}.
+
+artifacts:
+  collect:
+    - git_diff
+    - stdout
+    - stderr
+    - test_results
+    - files_changed
+
+export:
+  formats:
+    - openai_messages_jsonl
+  include_reasoning_content: true
+  include_tool_results: true
+  include_failed_runs: false

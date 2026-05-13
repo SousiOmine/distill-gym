@@ -37,6 +37,7 @@ class SandboxConfig(BaseModel):
     engine: SandboxEngine = SandboxEngine.podman
     repo_url: str = ""
     ref: str = "main"
+    use_git_cache: bool = True
     image: str = "docker.io/library/python:3.12-bookworm"
     workdir: str = "/workspace/repo"
     setup: list[str] = Field(default_factory=list)
@@ -91,10 +92,21 @@ class TaskItem(BaseModel):
     test_command: Optional[str] = None
 
 
+class TaskGenPrompt(BaseModel):
+    id: str
+    title: str = ""
+    prompt: str
+
+
 class TaskGenConfig(BaseModel):
     type: str = "repo_auto"
     prompt_template: str = "repo_bugfix_and_test_tasks"
     tasks: list[TaskItem] = Field(default_factory=list)
+    prompts: list[TaskGenPrompt] = Field(default_factory=list)
+    harness: HarnessConfig = Field(default_factory=HarnessConfig)
+    output_file: str = ".distill-gym/taskgen/tasks.json"
+    max_rounds: int = Field(default=5, ge=1)
+    batch_size: int = Field(default=3, ge=1)
 
 
 class ArtifactConfig(BaseModel):

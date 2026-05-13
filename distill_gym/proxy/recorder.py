@@ -10,6 +10,7 @@ class TraceRecorder:
         self.path.parent.mkdir(parents=True, exist_ok=True)
 
     def _write(self, event_type: str, data: dict, task_id: str = "") -> None:
+        self.path.parent.mkdir(parents=True, exist_ok=True)
         entry = {
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "event": event_type,

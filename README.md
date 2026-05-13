@@ -63,6 +63,7 @@ distill-gym cleanup
 ## 設定
 
 完全な設定例は [examples/git_repo_opencode.yaml](examples/git_repo_opencode.yaml) を参照してください。
+ハーネスでタスク生成も行う例は [examples/git_repo_harness_taskgen_opencode.yaml](examples/git_repo_harness_taskgen_opencode.yaml) を参照してください。
 
 主な設定項目:
 
@@ -71,7 +72,7 @@ distill-gym cleanup
 - **logging_proxy**: リッスンアドレス、キャプチャ設定、推論内容の正規化
 - **sandbox**: Git リポジトリ、コンテナイメージ、ボリューム、ネットワーク、環境変数
 - **harness**: インストールコマンド、実行コマンド、完了条件
-- **taskgen**: タスク生成戦略とテンプレート
+- **taskgen**: タスク生成戦略、静的タスク、または生成専用ハーネスと複数プロンプト
 - **artifacts**: 収集する成果物（stdout, stderr, diff, テスト結果）
 - **export**: 出力形式、推論内容/ツール呼び出し/失敗実行のフィルタリング
 
@@ -84,6 +85,30 @@ distill-gym proxy --config config.yaml
 ```
 
 サンドボックスは `OPENAI_BASE_URL=http://host.containers.internal:5002/v1` を使用してプロキシ経由で通信します。プロキシは `provider.api_key_env` から実際の API キーを注入するため、サンドボックスは実際のキーにアクセスできません。
+
+## ハーネスベースのタスク生成
+
+`taskgen.type: harness` を指定すると、実行用 `harness` とは別の `taskgen.harness` を使ってタスクを生成できます。`taskgen.prompts` に複数の生成プロンプトを定義すると、`run.task_count` に達するまでラウンドロビンで実行されます。
+
+生成ハーネスには `{output_file}` に JSON 配列を書き出させます。stdout はタスク結果として扱いません。
+
+```yaml
+taskgen:
+  type: harness
+  output_file: .distill-gym/taskgen/tasks.json
+  batch_size: 2
+  max_rounds: 6
+  harness:
+    type: opencode
+    run:
+      command: opencode run --format json {task.prompt.shell}
+  prompts:
+    - id: bugfix
+      prompt: |
+        Generate up to {batch_size} bugfix tasks.
+        Avoid duplicating these tasks: {existing_tasks_json}
+        Write only the JSON array to {output_file}.
+```
 
 ## 必要条件
 
@@ -129,7 +154,7 @@ distill-gym proxy --config config.yaml
 - `openai_compatible` プロバイダタイプのみ対応
 - `git_repository` サンドボックスタイプのみ実装
 - Docker バックエンドは将来の拡張として保留（現状 Podman のみ）
-- タスク生成は静的設定タスクまたはダミーテンプレートを使用。LLM ベースの生成は未実装
+- タスク生成は静的設定タスク、既存の `repo_auto`、または `taskgen.type: harness` に対応
 - ストリーミングモードのキャプチャは動作しますが、プロバイダ間の異種チャンク形式でエッジケースが存在する可能性があります
 
 ## 開発

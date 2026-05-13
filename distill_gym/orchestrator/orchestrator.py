@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
-from distill_gym.config.schema import Config, CleanupPolicy
+from distill_gym.config.schema import Config, CleanupPolicy, HarnessConfig
 from distill_gym.orchestrator.run_plan import RunPlan
 from distill_gym.storage.run_store import RunStore
 from distill_gym.storage.models import TaskRecord, ArtifactRecord
@@ -20,8 +20,9 @@ from distill_gym.harness.qwen_code import QwenCodeHarnessAdapter
 from distill_gym.sandbox.base import SandboxSpec
 from distill_gym.sandbox.builders.git_repository import GitRepositorySandboxBuilder
 from distill_gym.sandbox.manager import SandboxManager
+from distill_gym.taskgen.harness_task_generator import HarnessTaskGenerator
 from distill_gym.collectors.artifact_collector import ArtifactCollector
-from distill_gym.collectors.git_diff import collect_git_diff
+from distill_gym.collectors.git_diff import collect_git_diff, collect_changed_files
 from distill_gym.collectors.test_result import collect_test_result
 from distill_gym.cache.cache_store import get_artifacts_dir, get_cache_dir
 from distill_gym.storage.db import get_db
@@ -41,13 +42,53 @@ _handlers: dict[str, type[HarnessAdapter]] = {
 }
 
 
-def _make_harness(config: Config) -> HarnessAdapter:
-    cls = _handlers.get(config.harness.type)
+async def _start_proxy(config: Config, recorder: TraceRecorder) -> tuple[uvicorn.Server, asyncio.Task]:
+    app = create_proxy_app(config.provider, config.logging_proxy, recorder)
+    uvicorn_config = uvicorn.Config(
+        app,
+        host=config.logging_proxy.listen_host,
+        port=config.logging_proxy.listen_port,
+        log_level="warning",
+    )
+    server = uvicorn.Server(uvicorn_config)
+    task = asyncio.create_task(server.serve())
+    for _ in range(50):
+        if server.started:
+            return server, task
+        if task.done():
+            await task
+        await asyncio.sleep(0.1)
+    server.should_exit = True
+    raise RuntimeError(
+        f"logging proxy did not start on "
+        f"{config.logging_proxy.listen_host}:{config.logging_proxy.listen_port}"
+    )
+
+
+async def _stop_proxy(server: Optional[uvicorn.Server], task: Optional[asyncio.Task]) -> None:
+    if not server or not task:
+        return
+    server.should_exit = True
+    await asyncio.wait([task], timeout=10)
+
+
+def _make_harness_from_config(
+    harness_config: HarnessConfig,
+    provider: Optional[ProviderConfig] = None,
+    proxy_base_url: Optional[str] = None,
+) -> HarnessAdapter:
+    cls = _handlers.get(harness_config.type)
     if cls is None:
-        raise ValueError(f"Unknown harness type: {config.harness.type}")
-    if cls is MockHarnessAdapter:
-        return cls()
-    return cls(config.harness)
+        raise ValueError(f"Unknown harness type: {harness_config.type}")
+    return cls(harness_config, provider=provider, proxy_base_url=proxy_base_url)
+
+
+def _make_harness(config: Config, **extra) -> HarnessAdapter:
+    return _make_harness_from_config(config.harness, **extra)
+
+
+def _needs_harness_taskgen(config: Config) -> bool:
+    return config.taskgen.type == "harness" and not config.taskgen.tasks
 
 
 async def run(config: Config, dry_run: bool = False) -> str:
@@ -55,24 +96,72 @@ async def run(config: Config, dry_run: bool = False) -> str:
     store = RunStore()
     await store.create_run(plan.to_run_record())
 
-    for tr in plan.to_task_records():
-        await store.create_task(tr)
+    tasks_registered = False
+    if plan.tasks:
+        for tr in plan.to_task_records():
+            await store.create_task(tr)
+        tasks_registered = True
 
     if dry_run:
         await store.update_run(plan.run_id, status="completed", success=True)
         return plan.run_id
 
-    harness = _make_harness(config)
+    proxy_base_url: Optional[str] = None
     sandbox_manager: Optional[SandboxManager] = None
-    proxy_server = None
+    proxy_server: Optional[uvicorn.Server] = None
+    proxy_task: Optional[asyncio.Task] = None
+    proxy_recorder: Optional[TraceRecorder] = None
 
     try:
-        if config.harness.type != "mock":
+        needs_taskgen = _needs_harness_taskgen(config)
+        needs_sandbox = config.harness.type != "mock" or needs_taskgen
+        needs_proxy = config.harness.type != "mock" or (
+            needs_taskgen and config.taskgen.harness.type != "mock"
+        )
+
+        if needs_proxy:
+            proxy_base_url = f"http://host.containers.internal:{config.logging_proxy.listen_port}/v1"
+            proxy_recorder = TraceRecorder(get_artifacts_dir() / plan.run_id / "proxy" / "raw_trace.jsonl")
+            proxy_server, proxy_task = await _start_proxy(config, proxy_recorder)
+            config.sandbox.env.setdefault("OPENAI_BASE_URL", proxy_base_url)
+            config.sandbox.env.setdefault("OPENAI_API_KEY", "distill-gym-proxy")
+            config.sandbox.env.setdefault("OPENAI_MODEL", config.provider.model)
+
+        harness = _make_harness(
+            config,
+            provider=config.provider,
+            proxy_base_url=proxy_base_url,
+        )
+
+        if needs_sandbox:
             builder = GitRepositorySandboxBuilder()
             spec = builder.build(config.sandbox)
             sandbox_manager = SandboxManager()
             await sandbox_manager.start(spec)
             await sandbox_manager.prepare_git_repository(config.sandbox)
+            commit_code, commit_stdout, _ = await sandbox_manager.exec("git rev-parse HEAD", timeout=30)
+            if commit_code == 0:
+                await store.update_run(plan.run_id, commit_hash=commit_stdout.strip())
+
+        if needs_taskgen:
+            if sandbox_manager is None:
+                raise RuntimeError("task generation requires a sandbox")
+            taskgen_harness = _make_harness_from_config(
+                config.taskgen.harness,
+                provider=config.provider,
+                proxy_base_url=proxy_base_url,
+            )
+            await taskgen_harness.install(sandbox_manager)
+            taskgen = HarnessTaskGenerator(config.taskgen, taskgen_harness, sandbox_manager)
+            plan.tasks = await taskgen.generate(config.run.task_count, plan.run_id)
+            await taskgen.cleanup_output_file()
+
+        if not tasks_registered:
+            for tr in plan.to_task_records():
+                await store.create_task(tr)
+            tasks_registered = True
+
+        if config.harness.type != "mock":
             await harness.install(sandbox_manager)
 
         await store.update_run(plan.run_id, status="running")
@@ -86,15 +175,12 @@ async def run(config: Config, dry_run: bool = False) -> str:
             )
 
             try:
-                recorder = TraceRecorder(
-                    get_artifacts_dir() / plan.run_id / task.id / "raw_trace.jsonl"
-                )
+                raw_trace_path = get_artifacts_dir() / plan.run_id / task.id / "raw_trace.jsonl"
+                recorder = proxy_recorder or TraceRecorder(raw_trace_path)
+                recorder.path = raw_trace_path
                 recorder.record_event("task_started", {"task_id": task.id, "title": task.title}, db_task_id)
 
-                if config.harness.type == "mock":
-                    result = await harness.run_task(sandbox_manager, task, {})
-                else:
-                    result = await harness.run_task(sandbox_manager, task, {})
+                result = await harness.run_task(sandbox_manager, task)
 
                 recorder.record_event("task_finished", {
                     "exit_code": result.exit_code,
@@ -112,6 +198,11 @@ async def run(config: Config, dry_run: bool = False) -> str:
 
                 stdout_path = collector.save_text("stdout", result.stdout)
                 stderr_path = collector.save_text("stderr", result.stderr)
+                if raw_trace_path.exists():
+                    await store.create_artifact(ArtifactRecord(
+                        id=str(uuid.uuid4()), task_id=db_task_id, run_id=plan.run_id,
+                        kind="raw_trace", path=_rel_path(raw_trace_path), size=raw_trace_path.stat().st_size,
+                    ))
 
                 await store.create_artifact(ArtifactRecord(
                     id=str(uuid.uuid4()), task_id=db_task_id, run_id=plan.run_id,
@@ -123,6 +214,14 @@ async def run(config: Config, dry_run: bool = False) -> str:
                 ))
 
                 if sandbox_manager:
+                    changed_files = await collect_changed_files(sandbox_manager)
+                    if changed_files:
+                        changed_files_path = collector.save_json("changed_files", changed_files)
+                        await store.create_artifact(ArtifactRecord(
+                            id=str(uuid.uuid4()), task_id=db_task_id, run_id=plan.run_id,
+                            kind="changed_files", path=_rel_path(changed_files_path), size=changed_files_path.stat().st_size,
+                        ))
+
                     diff = await collect_git_diff(sandbox_manager)
                     if diff:
                         diff_path = collector.save_text("final", diff)
@@ -186,6 +285,7 @@ async def run(config: Config, dry_run: bool = False) -> str:
         raise RuntimeError(f"Run {plan.run_id}: {error_msg}") from e
 
     finally:
+        await _stop_proxy(proxy_server, proxy_task)
         if sandbox_manager and config.run.cleanup == CleanupPolicy.always:
             await sandbox_manager.destroy()
         elif sandbox_manager and config.run.cleanup == CleanupPolicy.on_failure:

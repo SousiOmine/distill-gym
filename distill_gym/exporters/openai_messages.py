@@ -1,6 +1,7 @@
 import json
 from pathlib import Path
 from typing import Optional
+import yaml
 
 from distill_gym.proxy.normalizer import normalize_assistant_message, merge_stream_chunks
 from distill_gym.storage.run_store import RunStore
@@ -102,9 +103,27 @@ async def _build_conversation(
         messages.extend(assistant_msgs)
 
     artifacts_map = {}
+    changed_files = []
     arts = await store.list_artifacts(run.id, task.id)
     for a in arts:
         artifacts_map[a.kind] = a.path
+        if a.kind == "changed_files":
+            changed_path = get_artifacts_dir() / a.path
+            if changed_path.exists():
+                try:
+                    changed_files = json.loads(changed_path.read_text(encoding="utf-8"))
+                except json.JSONDecodeError:
+                    changed_files = []
+
+    config_data = {}
+    if getattr(run, "config_yaml", ""):
+        try:
+            config_data = yaml.safe_load(run.config_yaml) or {}
+        except yaml.YAMLError:
+            config_data = {}
+    provider_cfg = config_data.get("provider", {})
+    sandbox_cfg = config_data.get("sandbox", {})
+    harness_cfg = config_data.get("harness", {})
 
     metadata = {
         "run_id": run.id,
@@ -112,17 +131,17 @@ async def _build_conversation(
         "task_title": task.title or "",
         "harness": {
             "name": run.harness_type or "",
-            "command": "",
+            "command": (harness_cfg.get("run") or {}).get("command", ""),
         },
         "provider": {
             "name": run.provider_name or "",
-            "base_url": "",
+            "base_url": provider_cfg.get("base_url", ""),
             "model": run.model or "",
         },
         "sandbox": {
             "type": run.sandbox_type or "",
             "engine": run.sandbox_engine or "",
-            "image": "",
+            "image": sandbox_cfg.get("image", ""),
             "repo_url": run.repo_url or "",
             "commit": run.commit_hash or "",
         },
@@ -130,7 +149,7 @@ async def _build_conversation(
             "success": task.success or False,
             "exit_code": task.exit_code,
             "tests_passed": task.tests_passed,
-            "changed_files": [],
+            "changed_files": changed_files,
         },
         "artifacts": artifacts_map,
     }

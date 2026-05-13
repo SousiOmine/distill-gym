@@ -55,6 +55,29 @@ class TestConfigHarness:
         assert len(config.taskgen.tasks) == 1
         assert config.taskgen.tasks[0].id == "t1"
 
+    def test_harness_taskgen_config(self):
+        data = {
+            "taskgen": {
+                "type": "harness",
+                "output_file": ".distill-gym/taskgen/tasks.json",
+                "batch_size": 2,
+                "max_rounds": 6,
+                "harness": {
+                    "type": "opencode",
+                    "run": {"command": "opencode run --format json {task.prompt.shell}"},
+                },
+                "prompts": [
+                    {"id": "bugfix", "prompt": "Generate bugfix tasks into {output_file}."},
+                    {"id": "tests", "title": "Tests", "prompt": "Generate test tasks."},
+                ],
+            }
+        }
+        config = Config.model_validate(data)
+        assert config.taskgen.type == "harness"
+        assert config.taskgen.output_file == ".distill-gym/taskgen/tasks.json"
+        assert config.taskgen.harness.type == "opencode"
+        assert [prompt.id for prompt in config.taskgen.prompts] == ["bugfix", "tests"]
+
     @pytest.mark.asyncio
     async def test_harness_install_failure_is_reported(self):
         class FailingSandbox:

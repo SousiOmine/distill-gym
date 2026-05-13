@@ -1,22 +1,26 @@
 import shlex
 import tempfile
+import posixpath
 from pathlib import Path
 from typing import Optional
 
 from distill_gym.sandbox.base import SandboxSpec
 from distill_gym.config.schema import SandboxConfig
 from distill_gym.sandbox.podman import PodmanClient
+from distill_gym.sandbox.podman_runtime import PodmanSandboxRuntime
+from distill_gym.sandbox.runtime import SandboxRuntime
+from distill_gym.cache.git_cache import clone_from_mirror
 
 
 class SandboxManager:
-    def __init__(self, podman: Optional[PodmanClient] = None):
-        self.podman = podman or PodmanClient()
+    def __init__(self, podman: Optional[PodmanClient] = None, runtime: Optional[SandboxRuntime] = None):
+        self.runtime = runtime or PodmanSandboxRuntime(podman)
         self.container_id: Optional[str] = None
         self.temp_dir: Optional[Path] = None
         self.workdir: str = "/workspace"
 
     async def start(self, spec: SandboxSpec) -> str:
-        self.container_id = self.podman.container_run(spec)
+        self.container_id = self.runtime.start(spec)
         self.temp_dir = Path(tempfile.mkdtemp(prefix="distill-gym-"))
         self.workdir = spec.workdir
         return self.container_id
@@ -29,7 +33,7 @@ class SandboxManager:
     ) -> tuple[int, str, str]:
         if not self.container_id:
             raise RuntimeError("Container not started")
-        return self.podman.container_exec(
+        return self.runtime.exec(
             self.container_id,
             command,
             timeout=timeout,
@@ -54,6 +58,17 @@ class SandboxManager:
         quoted_repo = shlex.quote(config.repo_url)
         quoted_ref = shlex.quote(config.ref)
 
+        if config.use_git_cache and self.temp_dir:
+            repo_dir_name = posixpath.basename(config.workdir.rstrip("/")) or "repo"
+            repo_parent = posixpath.dirname(config.workdir.rstrip("/")) or "/"
+            host_repo = self.temp_dir / repo_dir_name
+            clone_from_mirror(config.repo_url, host_repo, config.ref)
+            await self.checked_exec(f"mkdir -p {shlex.quote(repo_parent)}", workdir="/", context="create workdir parent")
+            await self.copy_to(str(host_repo), repo_parent)
+            for cmd in config.setup:
+                await self.checked_exec(cmd, timeout=900, context=f"sandbox setup command '{cmd}'")
+            return
+
         await self.checked_exec(f"mkdir -p {quoted_workdir}", workdir="/", context="create workdir")
         await self.checked_exec(
             "command -v git >/dev/null 2>&1 || "
@@ -76,20 +91,20 @@ class SandboxManager:
     async def copy_to(self, source: str, target: str) -> None:
         if not self.container_id:
             raise RuntimeError("Container not started")
-        self.podman.container_cp_to(self.container_id, source, target)
+        self.runtime.copy_to(self.container_id, source, target)
 
     async def copy_from(self, source: str, target: str) -> None:
         if not self.container_id:
             raise RuntimeError("Container not started")
-        self.podman.container_cp_from(self.container_id, source, target)
+        self.runtime.copy_from(self.container_id, source, target)
 
     async def stop(self) -> None:
         if self.container_id:
-            self.podman.container_stop(self.container_id)
+            self.runtime.stop(self.container_id)
 
     async def destroy(self) -> None:
         if self.container_id:
-            self.podman.container_rm(self.container_id)
+            self.runtime.remove(self.container_id)
             self.container_id = None
         if self.temp_dir and self.temp_dir.exists():
             import shutil
@@ -97,22 +112,7 @@ class SandboxManager:
             self.temp_dir = None
 
     async def cleanup_resources(self, label: str = "distill-gym=true") -> dict:
-        result = {"containers": 0, "volumes": 0, "networks": 0}
-
-        for c in self.podman.list_containers(label):
-            self.podman.container_stop(c.get("Id", ""))
-            self.podman.container_rm(c.get("Id", ""))
-            result["containers"] += 1
-
-        for v in self.podman.list_volumes(label):
-            self.podman.volume_rm(v)
-            result["volumes"] += 1
-
-        for n in self.podman.list_networks(label):
-            self.podman.network_rm(n)
-            result["networks"] += 1
-
-        return result
+        return self.runtime.cleanup_resources(label)
 
     def get_temp_dir(self) -> Optional[Path]:
         return self.temp_dir

@@ -37,4 +37,7 @@ class GitRepositorySandboxBuilder(SandboxBuilder):
             volumes=volumes,
             network_mode=network_mode,
             labels={"distill-gym": "true", "distill-gym-repo": config.repo_url},
+            source_type="git_repository",
+            source_url=config.repo_url,
+            source_ref=config.ref,
         )

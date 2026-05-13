@@ -10,6 +10,7 @@ from distill_gym.config.schema import Config
 from distill_gym.orchestrator.orchestrator import run as run_orch, cleanup as cleanup_orch
 from distill_gym.storage.run_store import RunStore
 from distill_gym.exporters.openai_messages import export_openai_messages_jsonl
+from distill_gym.exporters.chatml import export_chatml_jsonl
 from distill_gym.proxy.app import create_proxy_app
 from distill_gym.proxy.recorder import TraceRecorder
 from distill_gym.cache.cache_store import get_artifacts_dir
@@ -58,6 +59,35 @@ def run(
     typer.echo(f"Run completed: {run_id}")
 
 
+@app.command("run-repo")
+def run_repo(
+    repo_url: str = typer.Argument(..., help="Git repository URL"),
+    harness: str = typer.Option("opencode", "--harness", help="Harness type: codex, opencode, qwen-code, generic_cli"),
+    model: str = typer.Option(..., "--model", help="Provider model name"),
+    provider_base_url: str = typer.Option(..., "--provider-base-url", help="OpenAI-compatible provider base URL"),
+    api_key_env: str = typer.Option("OPENAI_API_KEY", "--api-key-env", help="Environment variable containing provider API key"),
+    ref: str = typer.Option("main", "--ref", help="Git ref to checkout"),
+    task_count: int = typer.Option(1, "--task-count", help="Number of tasks to generate"),
+):
+    """Run a repository job without writing a YAML file first."""
+    cfg = Config()
+    cfg.run.name = f"{harness}-{Path(repo_url).stem or 'repo'}"
+    cfg.run.task_count = task_count
+    cfg.provider.base_url = provider_base_url.rstrip("/")
+    cfg.provider.api_key_env = api_key_env
+    cfg.provider.model = model
+    cfg.sandbox.repo_url = repo_url
+    cfg.sandbox.ref = ref
+    cfg.harness.type = harness
+
+    try:
+        run_id = asyncio.run(run_orch(cfg))
+    except Exception as e:
+        typer.echo(f"Run failed: {e}", err=True)
+        raise typer.Exit(code=1)
+    typer.echo(f"Run completed: {run_id}")
+
+
 @app.command()
 def proxy(
     config: str = typer.Argument(..., help="Path to config YAML"),
@@ -97,6 +127,12 @@ def export(
                     include_reasoning=True, include_tool_results=True, include_failed=False,
                 )
                 typer.echo(f"Exported {count} conversations to {output_path}")
+            elif format == "chatml":
+                count = await export_chatml_jsonl(
+                    run_id=run_id, output=output_path, store=store,
+                    include_reasoning=True, include_tool_results=True, include_failed=False,
+                )
+                typer.echo(f"Exported {count} ChatML conversations to {output_path}")
             else:
                 typer.echo(f"Unknown format: {format}", err=True)
                 raise typer.Exit(code=1)
