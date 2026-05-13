@@ -1,0 +1,55 @@
+version: 1
+
+run:
+  name: mock-test-run
+  task_count: 2
+  concurrency: 1
+  timeout_minutes_per_task: 5
+  cleanup: always
+
+provider:
+  type: openai_compatible
+  name: mock
+  base_url: http://localhost:5002/v1
+  api_key_env: MOCK_API_KEY
+  model: mock-model
+
+logging_proxy:
+  listen_host: 127.0.0.1
+  listen_port: 5002
+  capture_stream_chunks: false
+  capture_raw_request: false
+  capture_raw_response: false
+  normalize_reasoning: false
+
+sandbox:
+  type: git_repository
+  engine: podman
+  repo_url: https://github.com/example/mock.git
+  ref: main
+  image: docker.io/library/python:3.12-bookworm
+  workdir: /workspace/repo
+
+harness:
+  type: mock
+  run:
+    command: echo "mock task"
+  completion:
+    success_exit_codes: [0]
+    max_idle_seconds: 30
+
+taskgen:
+  type: repo_auto
+  prompt_template: repo_bugfix_and_test_tasks
+
+artifacts:
+  collect:
+    - stdout
+    - stderr
+
+export:
+  formats:
+    - openai_messages_jsonl
+  include_reasoning_content: true
+  include_tool_results: true
+  include_failed_runs: false

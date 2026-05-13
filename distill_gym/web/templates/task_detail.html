@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% block title %}Task {{ task.id }}{% endblock %}
+{% block content %}
+<h1>Task: {{ task.id }}</h1>
+<p>Run: <a href="/runs/{{ run.id }}">{{ run.name }}</a></p>
+<p>Title: {{ task.title }}</p>
+<p>Prompt: {{ task.prompt }}</p>
+<p>Status: <span class="status status-{{ task.status }}">{{ task.status }}</span></p>
+<p>Exit Code: {{ task.exit_code }} | Success: {{ task.success }} | Tests Passed: {{ task.tests_passed }}</p>
+<p>Started: {{ task.started_at }} | Finished: {{ task.finished_at }}</p>
+{% if task.error_message %}
+<div class="error-box">
+    <strong>Error:</strong> {{ task.error_message }}
+</div>
+{% endif %}
+
+<h2>Artifacts</h2>
+<ul>
+    {% for art in artifacts %}
+    <li><a href="/artifacts/{{ art.path }}">{{ art.kind }}</a></li>
+    {% endfor %}
+</ul>
+{% endblock %}

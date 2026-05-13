@@ -1,0 +1,53 @@
+{% extends "base.html" %}
+{% block title %}Run {{ run.id[:16] }}{% endblock %}
+{% block content %}
+<h1>Run: {{ run.name }}</h1>
+<p>ID: {{ run.id }}</p>
+<p>Status: <span class="status status-{{ run.status }}">{{ run.status }}</span></p>
+<p>Harness: {{ run.harness_type }} | Model: {{ run.model }} | Provider: {{ run.provider_name }}</p>
+<p>Sandbox: {{ run.sandbox_type }} ({{ run.sandbox_engine }})</p>
+<p>Repo: {{ run.repo_url }} @ {{ run.commit }}</p>
+<p>Created: {{ run.created_at }} | Updated: {{ run.updated_at }}</p>
+<p>Success: {{ run.success }}</p>
+{% if run.error_message %}
+<div class="error-box">
+    <strong>Error:</strong> {{ run.error_message }}
+</div>
+{% endif %}
+
+<h2>Tasks</h2>
+<table>
+    <thead>
+        <tr>
+            <th>ID</th>
+            <th>Title</th>
+            <th>Status</th>
+            <th>Exit Code</th>
+            <th>Tests Passed</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for task in tasks %}
+        <tr class="{{ 'task-failed' if task.status == 'failed' }}">
+            <td><a href="/runs/{{ run.id }}/tasks/{{ task.id }}">{{ task.id }}</a></td>
+            <td>{{ task.title }}</td>
+            <td><span class="status status-{{ task.status }}">{{ task.status }}</span></td>
+            <td>{{ task.exit_code }}</td>
+            <td>{{ task.tests_passed }}</td>
+        </tr>
+        {% if task.error_message %}
+        <tr class="error-detail">
+            <td colspan="5"><span class="error-text">{{ task.error_message }}</span></td>
+        </tr>
+        {% endif %}
+        {% endfor %}
+    </tbody>
+</table>
+
+<h2>Artifacts</h2>
+<ul>
+    {% for art in artifacts %}
+    <li><a href="/artifacts/{{ art.path }}">{{ art.kind }}</a> ({{ art.size }} bytes)</li>
+    {% endfor %}
+</ul>
+{% endblock %}

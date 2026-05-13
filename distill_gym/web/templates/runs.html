@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+{% block title %}distill-gym - Runs{% endblock %}
+{% block content %}
+<h1>Runs</h1>
+<a href="/">&#8592; Back</a>
+<table>
+    <thead>
+        <tr>
+            <th>ID</th>
+            <th>Name</th>
+            <th>Status</th>
+            <th>Harness</th>
+            <th>Model</th>
+            <th>Created</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for run in runs %}
+        <tr class="{{ 'run-failed' if run.status == 'failed' }}">
+            <td><a href="/runs/{{ run.id }}">{{ run.id[:20] }}...</a></td>
+            <td>{{ run.name }}</td>
+            <td><span class="status status-{{ run.status }}">{{ run.status }}</span></td>
+            <td>{{ run.harness_type }}</td>
+            <td>{{ run.model }}</td>
+            <td>{{ run.created_at }}</td>
+        </tr>
+        {% if run.error_message %}
+        <tr class="error-detail">
+            <td colspan="6"><span class="error-text">{{ run.error_message }}</span></td>
+        </tr>
+        {% endif %}
+        {% endfor %}
+    </tbody>
+</table>
+{% endblock %}
