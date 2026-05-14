@@ -57,11 +57,32 @@ class RunStore:
             return None
         return RunRecord(**dict(row))
 
-    async def list_runs(self) -> list[RunRecord]:
+    async def list_runs(self, limit: int | None = None, offset: int = 0) -> list[RunRecord]:
         conn = await self._conn()
-        cursor = await conn.execute("SELECT * FROM runs ORDER BY created_at DESC")
+        query = "SELECT * FROM runs ORDER BY created_at DESC"
+        params: list = []
+        if limit is not None:
+            query += " LIMIT ?"
+            params.append(limit)
+            query += " OFFSET ?"
+            params.append(offset)
+        cursor = await conn.execute(query, params)
         rows = await cursor.fetchall()
         return [RunRecord(**dict(r)) for r in rows]
+
+    async def get_task_counts(self) -> dict[str, int]:
+        conn = await self._conn()
+        cursor = await conn.execute(
+            "SELECT run_id, COUNT(*) as cnt FROM tasks GROUP BY run_id"
+        )
+        rows = await cursor.fetchall()
+        return {row["run_id"]: row["cnt"] for row in rows}
+
+    async def get_total_run_count(self) -> int:
+        conn = await self._conn()
+        cursor = await conn.execute("SELECT COUNT(*) as cnt FROM runs")
+        row = await cursor.fetchone()
+        return row["cnt"]
 
     async def create_task(self, task: TaskRecord) -> None:
         conn = await self._conn()

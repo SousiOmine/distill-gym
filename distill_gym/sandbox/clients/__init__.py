@@ -5,11 +5,11 @@ from distill_gym.sandbox.base import SandboxSpec
 
 class ContainerClient(ABC):
     @abstractmethod
-    def container_run(self, spec: SandboxSpec) -> str:
+    async def container_run(self, spec: SandboxSpec) -> str:
         ...
 
     @abstractmethod
-    def container_exec(
+    async def container_exec(
         self,
         container_id: str,
         command: str,
@@ -19,41 +19,41 @@ class ContainerClient(ABC):
         ...
 
     @abstractmethod
-    def container_cp_to(self, container_id: str, source: str, target: str) -> None:
+    async def container_cp_to(self, container_id: str, source: str, target: str) -> None:
         ...
 
     @abstractmethod
-    def container_cp_from(self, container_id: str, source: str, target: str) -> None:
+    async def container_cp_from(self, container_id: str, source: str, target: str) -> None:
         ...
 
     @abstractmethod
-    def container_stop(self, container_id: str) -> None:
+    async def container_stop(self, container_id: str) -> None:
         ...
 
     @abstractmethod
-    def container_rm(self, container_id: str) -> None:
+    async def container_rm(self, container_id: str) -> None:
         ...
 
     @abstractmethod
-    def list_containers(self, label: str = "distill-gym=true") -> list[dict]:
+    async def list_containers(self, label: str = "distill-gym=true") -> list[dict]:
         ...
 
     @abstractmethod
-    def list_volumes(self, label: str = "distill-gym=true") -> list[str]:
+    async def list_volumes(self, label: str = "distill-gym=true") -> list[str]:
         ...
 
     @abstractmethod
-    def list_networks(self, label: str = "distill-gym=true") -> list[str]:
+    async def list_networks(self, label: str = "distill-gym=true") -> list[str]:
         ...
 
     @abstractmethod
-    def network_create(self, name: str, driver: str = "bridge") -> None:
+    async def network_create(self, name: str, driver: str = "bridge") -> None:
         ...
 
     @abstractmethod
-    def network_rm(self, name: str) -> None:
+    async def network_rm(self, name: str) -> None:
         ...
 
     @abstractmethod
-    def volume_rm(self, name: str) -> None:
+    async def volume_rm(self, name: str) -> None:
         ...

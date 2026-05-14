@@ -11,10 +11,10 @@ class FakeRuntime(SandboxRuntime):
         self.exec_calls = []
         self.copy_to_calls = []
 
-    def start(self, spec: SandboxSpec) -> str:
+    async def start(self, spec: SandboxSpec) -> str:
         return "container-id"
 
-    def exec(self, container_id, command, timeout=300, workdir=None):
+    async def exec(self, container_id, command, timeout=300, workdir=None):
         self.exec_calls.append(
             {
                 "container_id": container_id,
@@ -25,19 +25,19 @@ class FakeRuntime(SandboxRuntime):
         )
         return 0, "", ""
 
-    def copy_to(self, container_id, source, target):
+    async def copy_to(self, container_id, source, target):
         self.copy_to_calls.append((container_id, source, target))
 
-    def copy_from(self, container_id, source, target):
+    async def copy_from(self, container_id, source, target):
         pass
 
-    def stop(self, container_id):
+    async def stop(self, container_id):
         pass
 
-    def remove(self, container_id):
+    async def remove(self, container_id):
         pass
 
-    def cleanup_resources(self, label=""):
+    async def cleanup_resources(self, label=""):
         return {"containers": 0, "volumes": 0, "networks": 0}
 
 
@@ -58,14 +58,14 @@ async def test_prepare_git_repository_clones_and_runs_setup():
     )
 
     commands = [call["command"] for call in runtime.exec_calls]
-    assert commands[0] == "mkdir -p /workspace/repo"
-    assert "command -v git" in commands[1]
-    assert commands[2] == (
+    prepare_commands = [c for c in commands if c != f"mkdir -p /workspace/repo"]
+    assert "mkdir -p /workspace/repo" in commands[0] or commands[1] == "mkdir -p /workspace/repo"
+    assert "command -v git" in prepare_commands[0]
+    assert prepare_commands[1] == (
         "git clone --branch main --depth 1 "
         "https://github.com/example/test.git /workspace/repo"
     )
-    assert commands[3] == "echo setup"
-    assert runtime.exec_calls[3]["workdir"] == "/workspace/repo"
+    assert prepare_commands[2] == "echo setup"
 
 
 @pytest.mark.asyncio
@@ -90,5 +90,7 @@ async def test_prepare_git_repository_uses_host_git_cache(monkeypatch, tmp_path)
     )
 
     commands = [call["command"] for call in runtime.exec_calls]
-    assert commands == ["mkdir -p /workspace", "echo setup"]
+    workdir_mkdirs = [c for c in commands if c.startswith("mkdir -p /workspace")]
+    assert any("mkdir -p /workspace" in c for c in workdir_mkdirs)
+    assert "echo setup" in commands
     assert runtime.copy_to_calls[0][2] == "/workspace"

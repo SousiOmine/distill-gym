@@ -26,20 +26,26 @@ class OpencodeHarnessAdapter(GenericCliHarnessAdapter):
         model = self.provider.model if self.provider else ""
         base_url = self.proxy_base_url or ""
 
+        if "/" in model:
+            provider_prefix, model_id = model.split("/", 1)
+        else:
+            provider_prefix = "openai"
+            model_id = model
+
         if self._has_custom_command:
             command = self.config.run.command.format(**self._build_format_kwargs(task))
         else:
             prompt = shlex.quote(task.prompt)
             parts = [f"opencode run --format json {prompt}"]
             if model:
-                parts.append(f"--model openai/{shlex.quote(model)}")
+                parts.append(f"--model {shlex.quote(f'{provider_prefix}/{model_id}')}")
             command = " ".join(parts)
 
         if model and base_url:
             oc_config = json.dumps({
-                "model": f"openai/{model}",
+                "model": f"{provider_prefix}/{model_id}",
                 "provider": {
-                    "openai": {
+                    provider_prefix: {
                         "options": {
                             "baseURL": base_url,
                             "apiKey": "distill-gym-proxy",

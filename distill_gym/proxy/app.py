@@ -25,7 +25,10 @@ class ProxyApp:
         self._client = httpx.AsyncClient(timeout=300)
 
     def _resolve_api_key(self) -> str:
-        return os.environ.get(self.provider.api_key_env, "")
+        env_val = os.environ.get(self.provider.api_key_env)
+        if env_val:
+            return env_val
+        return self.provider.api_key_env or ""
 
     def _make_headers(self, request: Request) -> dict:
         api_key = self._resolve_api_key()

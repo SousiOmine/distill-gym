@@ -1,4 +1,6 @@
+import asyncio
 import json
+import logging
 import tempfile
 from pathlib import Path
 
@@ -9,6 +11,8 @@ from pydantic import BaseModel
 
 from distill_gym.storage.run_store import RunStore
 from distill_gym.cache.cache_store import get_artifacts_dir
+
+logger = logging.getLogger(__name__)
 
 
 STATIC_DIR = Path(__file__).parent / "static"
@@ -21,30 +25,36 @@ def create_web_app() -> FastAPI:
     # --- REST API Routes ---
 
     @app.get("/api/runs")
-    async def api_list_runs():
+    async def api_list_runs(limit: int = 50, offset: int = 0):
         store = RunStore()
         try:
-            runs = await store.list_runs()
-            result = []
-            for r in runs:
-                tasks = await store.list_tasks(r.id)
-                result.append({
-                    "id": r.id,
-                    "name": r.name,
-                    "status": r.status,
-                    "harness_type": r.harness_type,
-                    "model": r.model,
-                    "provider_name": r.provider_name,
-                    "sandbox_type": r.sandbox_type,
-                    "repo_url": r.repo_url,
-                    "success": r.success,
-                    "error_message": r.error_message,
-                    "created_at": r.created_at.isoformat() if r.created_at else "",
-                    "updated_at": r.updated_at.isoformat() if r.updated_at else "",
-                    "commit_hash": r.commit_hash,
-                    "task_count": len(tasks),
-                })
-            return result
+            runs = await store.list_runs(limit=limit, offset=offset)
+            task_counts = await store.get_task_counts()
+            total = await store.get_total_run_count()
+            return {
+                "runs": [
+                    {
+                        "id": r.id,
+                        "name": r.name,
+                        "status": r.status,
+                        "harness_type": r.harness_type,
+                        "model": r.model,
+                        "provider_name": r.provider_name,
+                        "sandbox_type": r.sandbox_type,
+                        "repo_url": r.repo_url,
+                        "success": r.success,
+                        "error_message": r.error_message,
+                        "created_at": r.created_at.isoformat() if r.created_at else "",
+                        "updated_at": r.updated_at.isoformat() if r.updated_at else "",
+                        "commit_hash": r.commit_hash,
+                        "task_count": task_counts.get(r.id, 0),
+                    }
+                    for r in runs
+                ],
+                "total": total,
+                "limit": limit,
+                "offset": offset,
+            }
         finally:
             await store.close()
 
@@ -149,7 +159,7 @@ def create_web_app() -> FastAPI:
     async def api_create_run(req: CreateRunRequest):
         import tempfile
         from distill_gym.config.loader import load_config
-        from distill_gym.orchestrator.orchestrator import run as run_orch
+        from distill_gym.orchestrator.orchestrator import _setup_run, _execute_run
 
         tmp = tempfile.NamedTemporaryFile(
             mode="w", suffix=".yaml", delete=False, encoding="utf-8",
@@ -159,10 +169,24 @@ def create_web_app() -> FastAPI:
             tmp.flush()
             tmp.close()
             cfg = load_config(tmp.name)
-            run_id = await run_orch(cfg)
-            return {"run_id": run_id}
+            plan, store = await _setup_run(cfg)
+            await store.close()
+            asyncio.create_task(_run_background(cfg, plan))
+            return {"run_id": plan.run_id}
         finally:
             Path(tmp.name).unlink(missing_ok=True)
+
+
+    async def _run_background(config, plan):
+        from distill_gym.orchestrator.orchestrator import _execute_run
+        from distill_gym.storage.run_store import RunStore
+        store = RunStore()
+        try:
+            await _execute_run(config, plan, store, dry_run=False)
+        except Exception:
+            logger.exception("Background run failed")
+        finally:
+            await store.close()
 
     class ExportRequest(BaseModel):
         run_id: str

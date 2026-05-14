@@ -8,41 +8,41 @@ class FakeExecClient:
     def __init__(self):
         self.commands = []
 
-    def container_run(self, spec):
+    async def container_run(self, spec):
         return "container-id"
 
-    def container_exec(self, cid, cmd, timeout=300, workdir=None):
+    async def container_exec(self, cid, cmd, timeout=300, workdir=None):
         self.commands.append((cid, cmd, timeout, workdir))
         return 0, "", ""
 
-    def container_cp_to(self, cid, src, dst):
+    async def container_cp_to(self, cid, src, dst):
         pass
 
-    def container_cp_from(self, cid, src, dst):
+    async def container_cp_from(self, cid, src, dst):
         pass
 
-    def container_stop(self, cid):
+    async def container_stop(self, cid):
         pass
 
-    def container_rm(self, cid):
+    async def container_rm(self, cid):
         pass
 
-    def list_containers(self, label=""):
+    async def list_containers(self, label=""):
         return []
 
-    def list_volumes(self, label=""):
+    async def list_volumes(self, label=""):
         return []
 
-    def list_networks(self, label=""):
+    async def list_networks(self, label=""):
         return []
 
-    def volume_rm(self, name):
+    async def volume_rm(self, name):
         pass
 
-    def network_create(self, name, driver="bridge"):
+    async def network_create(self, name, driver="bridge"):
         pass
 
-    def network_rm(self, name):
+    async def network_rm(self, name):
         pass
 
 
@@ -51,26 +51,26 @@ class FakeRuntime:
         self.client = FakeExecClient()
         self.commands = []
 
-    def start(self, spec):
+    async def start(self, spec):
         return "container-id"
 
-    def exec(self, cid, cmd, timeout=300, workdir=None):
+    async def exec(self, cid, cmd, timeout=300, workdir=None):
         self.commands.append((cid, cmd, timeout, workdir))
         return 0, "", ""
 
-    def copy_to(self, cid, src, dst):
+    async def copy_to(self, cid, src, dst):
         pass
 
-    def copy_from(self, cid, src, dst):
+    async def copy_from(self, cid, src, dst):
         pass
 
-    def stop(self, cid):
+    async def stop(self, cid):
         pass
 
-    def remove(self, cid):
+    async def remove(self, cid):
         pass
 
-    def cleanup_resources(self, label=""):
+    async def cleanup_resources(self, label=""):
         return {"containers": 0, "volumes": 0, "networks": 0}
 
 
@@ -144,7 +144,7 @@ async def test_execute_mkdir_step():
 
     mkdir_commands = [c for c in runtime.commands if "mkdir" in c[1]]
     assert len(mkdir_commands) > 0
-    assert "/workspace/data" in mkdir_commands[0][1]
+    assert "/workspace/data" in mkdir_commands[-1][1]
 
 
 @pytest.mark.asyncio

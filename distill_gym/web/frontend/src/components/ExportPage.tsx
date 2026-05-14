@@ -12,7 +12,7 @@ export function ExportPage() {
 
   useEffect(() => {
     api.listRuns()
-      .then(setRuns)
+      .then(res => setRuns(res.runs))
       .catch(() => {})
   }, [])
 

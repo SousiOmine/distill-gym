@@ -24,9 +24,10 @@ class SandboxManager:
         self.workdir: str = "/workspace"
 
     async def start(self, spec: SandboxSpec) -> str:
-        self.container_id = self.runtime.start(spec)
+        self.container_id = await self.runtime.start(spec)
         self.temp_dir = Path(tempfile.mkdtemp(prefix="distill-gym-"))
         self.workdir = spec.workdir
+        await self.runtime.exec(self.container_id, f"mkdir -p {shlex.quote(self.workdir)}", timeout=10, workdir="/")
         return self.container_id
 
     async def exec(
@@ -37,7 +38,7 @@ class SandboxManager:
     ) -> tuple[int, str, str]:
         if not self.container_id:
             raise RuntimeError("Container not started")
-        return self.runtime.exec(
+        return await self.runtime.exec(
             self.container_id,
             command,
             timeout=timeout,
@@ -196,20 +197,20 @@ class SandboxManager:
     async def copy_to(self, source: str, target: str) -> None:
         if not self.container_id:
             raise RuntimeError("Container not started")
-        self.runtime.copy_to(self.container_id, source, target)
+        await self.runtime.copy_to(self.container_id, source, target)
 
     async def copy_from(self, source: str, target: str) -> None:
         if not self.container_id:
             raise RuntimeError("Container not started")
-        self.runtime.copy_from(self.container_id, source, target)
+        await self.runtime.copy_from(self.container_id, source, target)
 
     async def stop(self) -> None:
         if self.container_id:
-            self.runtime.stop(self.container_id)
+            await self.runtime.stop(self.container_id)
 
     async def destroy(self) -> None:
         if self.container_id:
-            self.runtime.remove(self.container_id)
+            await self.runtime.remove(self.container_id)
             self.container_id = None
         if self.temp_dir and self.temp_dir.exists():
             import shutil
@@ -217,7 +218,7 @@ class SandboxManager:
             self.temp_dir = None
 
     async def cleanup_resources(self, label: str = "distill-gym=true") -> dict:
-        return self.runtime.cleanup_resources(label)
+        return await self.runtime.cleanup_resources(label)
 
     def get_temp_dir(self) -> Optional[Path]:
         return self.temp_dir

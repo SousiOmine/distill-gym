@@ -8,8 +8,10 @@ DB_PATH = Path.home() / ".cache" / "distill-gym" / "runs.db"
 async def get_db(path: Path | None = None) -> aiosqlite.Connection:
     db_path = path or DB_PATH
     db_path.parent.mkdir(parents=True, exist_ok=True)
-    conn = await aiosqlite.connect(str(db_path))
+    conn = await aiosqlite.connect(str(db_path), timeout=10)
     conn.row_factory = aiosqlite.Row
+    await conn.execute("PRAGMA journal_mode=WAL")
+    await conn.execute("PRAGMA busy_timeout=10000")
     await _ensure_tables(conn)
     return conn
 

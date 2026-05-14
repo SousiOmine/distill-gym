@@ -40,7 +40,11 @@ class HarnessTaskGenerator(TaskGenerator):
             )
             result = await self.harness.run_task(self.sandbox, task)
             if not result.success:
-                detail = result.stderr.strip() or result.stdout.strip() or f"exit code {result.exit_code}"
+                detail = f"exit code {result.exit_code}"
+                if result.stderr.strip():
+                    detail += f", stderr={result.stderr.strip()}"
+                if result.stdout.strip():
+                    detail += f", stdout={result.stdout.strip()}"
                 raise RuntimeError(f"task generation harness failed: {detail}")
 
             for generated in await self._read_generated_tasks():
@@ -95,7 +99,11 @@ class HarnessTaskGenerator(TaskGenerator):
         path = shlex.quote(self.config.output_file)
         code, stdout, stderr = await self.sandbox.exec(f"mkdir -p $(dirname {path}) && rm -f {path}", timeout=30)
         if code != 0:
-            detail = stderr.strip() or stdout.strip() or f"exit code {code}"
+            detail = f"exit code {code}"
+            if stderr.strip():
+                detail += f", stderr={stderr.strip()}"
+            if stdout.strip():
+                detail += f", stdout={stdout.strip()}"
             raise RuntimeError(f"failed to prepare task generation output file: {detail}")
 
     async def cleanup_output_file(self) -> None:

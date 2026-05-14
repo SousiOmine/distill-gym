@@ -35,7 +35,7 @@ export function RunsPage() {
 
   const fetchRuns = () => {
     api.listRuns()
-      .then(setRuns)
+      .then(res => setRuns(res.runs))
       .catch(e => setError(e.message))
       .finally(() => setLoading(false))
   }

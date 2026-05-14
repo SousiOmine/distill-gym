@@ -12,6 +12,13 @@ async function fetchJSON<T>(url: string, init?: RequestInit): Promise<T> {
   return res.json()
 }
 
+export interface ListRunsResponse {
+  runs: Run[]
+  total: number
+  limit: number
+  offset: number
+}
+
 export interface Run {
   id: string
   name: string
@@ -54,7 +61,7 @@ export interface Artifact {
 }
 
 export const api = {
-  listRuns: () => fetchJSON<Run[]>('/runs'),
+  listRuns: () => fetchJSON<ListRunsResponse>('/runs'),
 
   getRun: (id: string) => fetchJSON<Run>(`/runs/${id}`),
 

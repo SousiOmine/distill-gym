@@ -15,6 +15,7 @@ from distill_gym.proxy.recorder import TraceRecorder
 from distill_gym.proxy.app import create_proxy_app
 from distill_gym.registry.harness_registry import HarnessRegistry
 from distill_gym.registry.builder_registry import BuilderRegistry
+import distill_gym.sandbox.builders  # noqa: F401  - triggers BuilderRegistry registration
 from distill_gym.sandbox.manager import SandboxManager
 from distill_gym.taskgen.harness_task_generator import HarnessTaskGenerator
 from distill_gym.collectors.artifact_collector import ArtifactCollector
@@ -82,11 +83,15 @@ def _needs_harness_taskgen(config: Config) -> bool:
     return config.taskgen.type == "harness" and not config.taskgen.tasks
 
 
-async def run(config: Config, dry_run: bool = False) -> str:
+async def _setup_run(config: Config) -> tuple[RunPlan, RunStore]:
     plan = await RunPlan.from_config(config)
     store = RunStore()
-    event_bus = get_event_bus()
     await store.create_run(plan.to_run_record())
+    return plan, store
+
+
+async def _execute_run(config: Config, plan: RunPlan, store: RunStore, dry_run: bool = False) -> str:
+    event_bus = get_event_bus()
 
     tasks_registered = False
     if plan.tasks:
@@ -137,7 +142,7 @@ async def run(config: Config, dry_run: bool = False) -> str:
             sandbox_runtime = create_runtime(config.sandbox.engine.value)
             if config.sandbox.network.mode.value == "proxy_only":
                 network_name = f"distill-gym-{plan.run_id}"
-                sandbox_runtime.client.network_create(network_name)
+                await sandbox_runtime.client.network_create(network_name)
                 created_network = network_name
                 spec.network_name = network_name
 
@@ -301,7 +306,7 @@ async def run(config: Config, dry_run: bool = False) -> str:
     finally:
         try:
             if created_network and sandbox_runtime:
-                sandbox_runtime.client.network_rm(created_network)
+                await sandbox_runtime.client.network_rm(created_network)
         except Exception:
             logger.warning(f"Failed to remove network {created_network}", exc_info=True)
 
@@ -312,9 +317,16 @@ async def run(config: Config, dry_run: bool = False) -> str:
             run_rec = await store.get_run(plan.run_id)
             if run_rec and run_rec.success is not True:
                 await sandbox_manager.destroy()
-        await store.close()
 
     return plan.run_id
+
+
+async def run(config: Config, dry_run: bool = False) -> str:
+    plan, store = await _setup_run(config)
+    try:
+        return await _execute_run(config, plan, store, dry_run)
+    finally:
+        await store.close()
 
 
 async def cleanup(label: str = "distill-gym=true") -> dict:
