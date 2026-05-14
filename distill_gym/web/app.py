@@ -276,9 +276,16 @@ def create_web_app() -> FastAPI:
     if HAS_REACT_BUILD:
         app.mount("/assets", StaticFiles(directory=str(STATIC_DIR / "assets")), name="assets")
 
+        @app.get("/artifacts/{path:path}")
+        async def serve_artifact(path: str):
+            file_path = get_artifacts_dir() / path
+            if file_path.exists():
+                return FileResponse(str(file_path))
+            raise HTTPException(404, "Artifact not found")
+
         @app.get("/{full_path:path}")
         async def serve_spa(full_path: str):
-            if full_path.startswith(("api/", "artifacts/")):
+            if full_path.startswith("api/"):
                 raise HTTPException(404)
             file_path = STATIC_DIR / "index.html"
             if file_path.exists():
@@ -335,13 +342,11 @@ def create_web_app() -> FastAPI:
             })
             return HTMLResponse(html)
 
-    # --- Artifact serving (shared) ---
-
-    @app.get("/artifacts/{path:path}")
-    async def serve_artifact(path: str):
-        file_path = get_artifacts_dir() / path
-        if file_path.exists():
-            return FileResponse(str(file_path))
-        raise HTTPException(404, "Artifact not found")
+        @app.get("/artifacts/{path:path}")
+        async def serve_artifact(path: str):
+            file_path = get_artifacts_dir() / path
+            if file_path.exists():
+                return FileResponse(str(file_path))
+            raise HTTPException(404, "Artifact not found")
 
     return app
