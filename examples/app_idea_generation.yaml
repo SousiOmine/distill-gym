@@ -45,7 +45,7 @@ harness:
     command: opencode run --format json {task.prompt.shell}
   completion:
     success_exit_codes: [0]
-    max_idle_seconds: 120
+    max_idle_seconds: 600
 
 taskgen:
   type: harness
@@ -62,7 +62,7 @@ taskgen:
       command: opencode run --format json {task.prompt.shell}
     completion:
       success_exit_codes: [0]
-      max_idle_seconds: 120
+      max_idle_seconds: 600
   prompts:
     - id: app_idea
       title: Pythonアプリ案の生成
