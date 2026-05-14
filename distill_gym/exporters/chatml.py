@@ -33,10 +33,11 @@ async def export_chatml_jsonl(
         for task in tasks:
             if not include_failed and task.success is not True:
                 continue
-            messages, metadata = await _build_conversation(
+            conversations, metadata = await _build_conversation(
                 run, task, store, include_reasoning, include_tool_results,
             )
-            text = "\n".join(_message_to_chatml(m) for m in messages)
-            f.write(json.dumps({"text": text, "metadata": metadata}, ensure_ascii=False, default=str) + "\n")
-            count += 1
+            for conversation in conversations:
+                text = "\n".join(_message_to_chatml(m) for m in conversation)
+                f.write(json.dumps({"text": text, "metadata": metadata}, ensure_ascii=False, default=str) + "\n")
+                count += 1
     return count

@@ -33,18 +33,18 @@ async def merge_runs_to_jsonl(
                 if not include_failed and task.success is not True:
                     continue
 
-                messages, metadata = await _build_conversation(
+                conversations, metadata = await _build_conversation(
                     run, task, store, include_reasoning, include_tool_results,
                 )
-                messages = _ensure_message(messages, task)
-
-                record = {
-                    "messages": messages,
-                    "metadata": metadata,
-                    "source_run_id": run_id,
-                }
-                f.write(json.dumps(record, ensure_ascii=False, default=str) + "\n")
-                count += 1
+                for conversation in conversations:
+                    conversation = _ensure_message(conversation, task)
+                    record = {
+                        "messages": conversation,
+                        "metadata": metadata,
+                        "source_run_id": run_id,
+                    }
+                    f.write(json.dumps(record, ensure_ascii=False, default=str) + "\n")
+                    count += 1
 
     return count
 
@@ -71,18 +71,18 @@ async def merge_runs_to_chatml(
                 if not include_failed and task.success is not True:
                     continue
 
-                messages, metadata = await _build_conversation(
+                conversations, metadata = await _build_conversation(
                     run, task, store, include_reasoning, include_tool_results,
                 )
-                messages = _ensure_message(messages, task)
-
-                text = "\n".join(_message_to_chatml(m) for m in messages)
-                record = {
-                    "text": text,
-                    "metadata": metadata,
-                    "source_run_id": run_id,
-                }
-                f.write(json.dumps(record, ensure_ascii=False, default=str) + "\n")
-                count += 1
+                for conversation in conversations:
+                    conversation = _ensure_message(conversation, task)
+                    text = "\n".join(_message_to_chatml(m) for m in conversation)
+                    record = {
+                        "text": text,
+                        "metadata": metadata,
+                        "source_run_id": run_id,
+                    }
+                    f.write(json.dumps(record, ensure_ascii=False, default=str) + "\n")
+                    count += 1
 
     return count

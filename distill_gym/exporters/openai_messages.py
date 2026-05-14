@@ -28,79 +28,41 @@ async def export_openai_messages_jsonl(
             if not include_failed and task.success is not True:
                 continue
 
-            messages, metadata = await _build_conversation(
+            conversations, metadata = await _build_conversation(
                 run, task, store, include_reasoning, include_tool_results,
             )
 
-            record = {
-                "messages": messages,
-                "metadata": metadata,
-            }
-            f.write(json.dumps(record, ensure_ascii=False, default=str) + "\n")
-            count += 1
+            for conversation in conversations:
+                record = {
+                    "messages": conversation,
+                    "metadata": metadata,
+                }
+                f.write(json.dumps(record, ensure_ascii=False, default=str) + "\n")
+                count += 1
 
     return count
 
 
 async def _build_conversation(
     run, task, store, include_reasoning: bool, include_tool_results: bool,
-) -> tuple[list, dict]:
-    messages: list[dict] = []
+) -> tuple[list[list[dict]], dict]:
     short_task_id = task.id.removeprefix(f"{run.id}_") if task.id.startswith(f"{run.id}_") else task.id
     raw_trace_path = get_artifacts_dir() / run.id / short_task_id / "raw_trace.jsonl"
 
+    conversations: list[list[dict]] = []
+
     if raw_trace_path.exists():
-        system_msg = None
-        user_msgs: list[dict] = []
-        assistant_msgs: list[dict] = []
-        stream_chunks: list[dict] = []
-        in_stream = False
+        pairs = _parse_trace_events(raw_trace_path, include_reasoning)
+        conv_groups = _group_into_conversations(pairs)
 
-        with open(raw_trace_path, encoding="utf-8") as f:
-            for line in f:
-                line = line.strip()
-                if not line:
-                    continue
-                try:
-                    event = json.loads(line)
-                except json.JSONDecodeError:
-                    continue
+        for group in conv_groups:
+            conversation = _reconstruct_conversation(group, include_tool_results, include_reasoning)
+            if conversation:
+                conversations.append(conversation)
 
-                data = event.get("data", {})
-                if event["event"] == "llm_request":
-                    req_messages = data.get("messages", [])
-                    for msg in req_messages:
-                        if msg.get("role") == "system":
-                            system_msg = msg
-                        elif msg.get("role") == "user":
-                            user_msgs.append(msg)
-                        elif msg.get("role") == "assistant":
-                            assistant_msgs.append(msg)
-                        elif msg.get("role") == "tool":
-                            if include_tool_results:
-                                assistant_msgs.append(msg)
-
-                elif event["event"] == "llm_stream_chunk":
-                    stream_chunks.append(data)
-
-                elif event["event"] == "llm_response":
-                    if stream_chunks:
-                        merged, _ = merge_stream_chunks(stream_chunks)
-                        if not include_reasoning:
-                            merged.pop("reasoning_content", None)
-                        if merged.get("tool_calls") or merged.get("content"):
-                            assistant_msgs.append(merged)
-                        stream_chunks = []
-                    else:
-                        for choice in data.get("choices", []):
-                            msg = normalize_assistant_message(choice, normalize_reasoning=include_reasoning)
-                            if msg.get("tool_calls") or msg.get("content"):
-                                assistant_msgs.append(msg)
-
-        if system_msg:
-            messages.append(system_msg)
-        messages.extend(user_msgs)
-        messages.extend(assistant_msgs)
+    # Fallback: if no conversations from trace but task has a prompt, create a default
+    if not conversations and task and task.prompt:
+        conversations.append([{"role": "user", "content": task.prompt}])
 
     artifacts_map = {}
     changed_files = []
@@ -154,4 +116,110 @@ async def _build_conversation(
         "artifacts": artifacts_map,
     }
 
-    return messages, metadata
+    return conversations, metadata
+
+
+def _parse_trace_events(
+    trace_path: Path, include_reasoning: bool,
+) -> list[tuple[list[dict], dict]]:
+    pairs: list[tuple[list[dict], dict]] = []
+    curr_request = None
+
+    with open(trace_path, encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                event = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+
+            data = event.get("data", {})
+
+            if event["event"] == "llm_request":
+                curr_request = data.get("messages", [])
+            elif event["event"] == "llm_response":
+                if curr_request is not None:
+                    choices = data.get("choices", [])
+                    if choices:
+                        response_msg = normalize_assistant_message(
+                            choices[0], normalize_reasoning=include_reasoning,
+                        )
+                        if response_msg.get("tool_calls") or response_msg.get("content") or response_msg.get("reasoning_content"):
+                            pairs.append((list(curr_request), response_msg))
+                    curr_request = None
+
+    return pairs
+
+
+def _group_into_conversations(
+    pairs: list[tuple[list[dict], dict]],
+) -> list[list[tuple[list[dict], dict]]]:
+    groups: list[list[tuple[list[dict], dict]]] = []
+    current: list[tuple[list[dict], dict]] = []
+
+    for request_msgs, response in pairs:
+        if current:
+            prev_request = current[-1][0]
+            if _is_new_conversation(prev_request, request_msgs):
+                groups.append(current)
+                current = []
+        current.append((request_msgs, response))
+
+    if current:
+        groups.append(current)
+
+    return groups
+
+
+def _is_new_conversation(prev_request: list[dict], curr_request: list[dict]) -> bool:
+    if len(curr_request) < len(prev_request):
+        return True
+    if len(curr_request) == len(prev_request):
+        for i in range(len(curr_request)):
+            p = prev_request[i]
+            c = curr_request[i]
+            if p.get("role") != c.get("role") or p.get("content") != c.get("content"):
+                return True
+    return False
+
+
+def _reconstruct_conversation(
+    group: list[tuple[list[dict], dict]],
+    include_tool_results: bool,
+    include_reasoning: bool,
+) -> list[dict]:
+    if not group:
+        return []
+
+    last_request_messages = group[-1][0]
+    last_response = group[-1][1]
+
+    response_msgs = [pair[1] for pair in group if pair[1] is not None]
+
+    messages: list[dict] = []
+    response_idx = 0
+
+    for msg in last_request_messages:
+        role = msg.get("role", "")
+        if role == "tool" and not include_tool_results:
+            continue
+
+        msg_copy = dict(msg)
+
+        if role == "assistant" and response_idx < len(response_msgs):
+            resp = response_msgs[response_idx]
+            if include_reasoning and resp.get("reasoning_content") and not msg_copy.get("reasoning_content"):
+                msg_copy["reasoning_content"] = resp["reasoning_content"]
+            response_idx += 1
+
+        messages.append(msg_copy)
+
+    if last_response:
+        final = dict(last_response)
+        if not include_reasoning:
+            final.pop("reasoning_content", None)
+        messages.append(final)
+
+    return messages
