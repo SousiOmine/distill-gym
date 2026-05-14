@@ -1,10 +1,12 @@
 import asyncio
 import json
 import logging
+import shlex
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
+from urllib.parse import urlparse, urlunparse
 
 from distill_gym.config.schema import Config, CleanupPolicy, HarnessConfig, ProviderConfig
 from distill_gym.orchestrator.run_plan import RunPlan
@@ -13,6 +15,7 @@ from distill_gym.storage.run_store import RunStore
 from distill_gym.storage.models import TaskRecord, ArtifactRecord
 from distill_gym.proxy.recorder import TraceRecorder
 from distill_gym.proxy.app import create_proxy_app
+from distill_gym.proxy.addressing import proxy_base_url_for_sandbox, proxy_listen_host_for_sandbox
 from distill_gym.registry.harness_registry import HarnessRegistry
 from distill_gym.registry.builder_registry import BuilderRegistry
 import distill_gym.sandbox.builders  # noqa: F401  - triggers BuilderRegistry registration
@@ -34,11 +37,16 @@ from distill_gym.sandbox.runtimes import create_runtime
 logger = logging.getLogger(__name__)
 
 
-async def _start_proxy(config: Config, recorder: TraceRecorder) -> tuple[uvicorn.Server, asyncio.Task]:
+async def _start_proxy(
+    config: Config,
+    recorder: TraceRecorder,
+    listen_host: Optional[str] = None,
+) -> tuple[uvicorn.Server, asyncio.Task]:
     app = create_proxy_app(config.provider, config.logging_proxy, recorder)
+    host = listen_host or config.logging_proxy.listen_host
     uvicorn_config = uvicorn.Config(
         app,
-        host=config.logging_proxy.listen_host,
+        host=host,
         port=config.logging_proxy.listen_port,
         log_level="warning",
     )
@@ -53,7 +61,7 @@ async def _start_proxy(config: Config, recorder: TraceRecorder) -> tuple[uvicorn
     server.should_exit = True
     raise RuntimeError(
         f"logging proxy did not start on "
-        f"{config.logging_proxy.listen_host}:{config.logging_proxy.listen_port}"
+        f"{host}:{config.logging_proxy.listen_port}"
     )
 
 
@@ -83,6 +91,54 @@ def _make_harness(config: Config, **extra):
 
 def _needs_harness_taskgen(config: Config) -> bool:
     return config.taskgen.type == "harness" and not config.taskgen.tasks
+
+
+def _proxy_health_url(proxy_base_url: str) -> str:
+    parsed = urlparse(proxy_base_url)
+    return urlunparse((parsed.scheme, parsed.netloc, "/health", "", "", ""))
+
+
+async def _ensure_proxy_reachable_from_sandbox(
+    sandbox_manager: SandboxManager,
+    proxy_base_url: str,
+) -> None:
+    health_url = _proxy_health_url(proxy_base_url)
+    py = (
+        "import sys, urllib.request\n"
+        f"url = {health_url!r}\n"
+        "try:\n"
+        "    response = urllib.request.urlopen(url, timeout=5)\n"
+        "    sys.exit(0 if response.status == 200 else 1)\n"
+        "except Exception as exc:\n"
+        "    print(exc, file=sys.stderr)\n"
+        "    sys.exit(1)\n"
+    )
+    command = (
+        "if command -v python3 >/dev/null 2>&1; then "
+        f"python3 -c {shlex.quote(py)}; "
+        "elif command -v python >/dev/null 2>&1; then "
+        f"python -c {shlex.quote(py)}; "
+        "elif command -v curl >/dev/null 2>&1; then "
+        f"curl -fsS --max-time 5 {shlex.quote(health_url)} >/dev/null; "
+        "else exit 77; fi"
+    )
+    code, stdout, stderr = await sandbox_manager.exec(command, timeout=10, workdir="/")
+    if code == 0:
+        return
+    if code == 77:
+        logger.info(
+            "Skipping logging proxy reachability check: sandbox has neither python nor curl"
+        )
+        return
+
+    detail = (stderr.strip() or stdout.strip() or f"exit code {code}").strip()
+    raise RuntimeError(
+        "sandbox cannot reach the logging proxy at "
+        f"{health_url}: {detail}. On Windows with WSL/Podman, check Windows "
+        "firewall rules, the WSL default gateway selected by "
+        "logging_proxy.sandbox_host=auto, or set logging_proxy.sandbox_host "
+        "explicitly."
+    )
 
 
 async def _setup_run(config: Config) -> tuple[RunPlan, RunStore]:
@@ -120,10 +176,25 @@ async def _execute_run(config: Config, plan: RunPlan, store: RunStore, dry_run: 
             needs_taskgen and config.taskgen.harness.type != "mock"
         )
 
+        platform = detect()
+        if needs_sandbox and config.sandbox.engine.value == "podman":
+            ensure_podman_ready(platform)
+
         if needs_proxy:
-            proxy_base_url = f"http://host.containers.internal:{config.logging_proxy.listen_port}/v1"
+            proxy_base_url = proxy_base_url_for_sandbox(config, platform)
             proxy_recorder = TraceRecorder(get_artifacts_dir() / plan.run_id / "proxy" / "raw_trace.jsonl")
-            proxy_server, proxy_task = await _start_proxy(config, proxy_recorder)
+            proxy_listen_host = proxy_listen_host_for_sandbox(config, platform)
+            proxy_server, proxy_task = await _start_proxy(
+                config,
+                proxy_recorder,
+                listen_host=proxy_listen_host,
+            )
+            logger.info(
+                "Logging proxy listening on %s:%s; sandbox OPENAI_BASE_URL=%s",
+                proxy_listen_host,
+                config.logging_proxy.listen_port,
+                proxy_base_url,
+            )
             config.sandbox.env.setdefault("OPENAI_BASE_URL", proxy_base_url)
             config.sandbox.env.setdefault("OPENAI_API_KEY", "distill-gym-proxy")
             config.sandbox.env.setdefault("OPENAI_MODEL", config.provider.model)
@@ -135,9 +206,6 @@ async def _execute_run(config: Config, plan: RunPlan, store: RunStore, dry_run: 
         )
 
         if needs_sandbox:
-            if config.sandbox.engine.value == "podman":
-                ensure_podman_ready(detect())
-
             builder = BuilderRegistry.create(config.sandbox.type)
             errors = builder.validate(config.sandbox)
             if errors:
@@ -160,6 +228,9 @@ async def _execute_run(config: Config, plan: RunPlan, store: RunStore, dry_run: 
             commit_code, commit_stdout, _ = await sandbox_manager.exec("git rev-parse HEAD", timeout=30)
             if commit_code == 0:
                 await store.update_run(plan.run_id, commit_hash=commit_stdout.strip())
+
+            if proxy_base_url:
+                await _ensure_proxy_reachable_from_sandbox(sandbox_manager, proxy_base_url)
 
         if needs_taskgen:
             if sandbox_manager is None:

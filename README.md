@@ -84,7 +84,9 @@ distill-gym cleanup
 distill-gym proxy --config config.yaml
 ```
 
-サンドボックスは `OPENAI_BASE_URL=http://host.containers.internal:5002/v1` を使用してプロキシ経由で通信します。プロキシは `provider.api_key_env` から実際の API キーを注入するため、サンドボックスは実際のキーにアクセスできません。
+サンドボックスはプロキシ経由で通信します。接続先ホストは `logging_proxy.sandbox_host` で指定でき、既定値 `auto` では Podman は `host.containers.internal`、Windows の Docker は `host.docker.internal` を使います。Windows 上の Podman machine が WSL VM の場合は、WSL の default gateway を自動検出して Windows 側プロキシへ接続します。Windows で内部実行する場合、プロキシはサンドボックスから到達できるように `127.0.0.1` ではなく `0.0.0.0` へ bind します。プロキシは `provider.api_key_env` から実際の API キーを注入するため、サンドボックスは実際のキーにアクセスできません。
+
+Windows + WSL + Podman でプロキシへ到達できない場合も、通常は `logging_proxy.sandbox_host: auto` のまま使ってください。手動で回避する場合は `podman machine ssh "ip route show default"` を実行し、`default via 172.22.224.1` のように表示される IP を `logging_proxy.sandbox_host: 172.22.224.1` として指定します。Windows ファイアウォールが Python/uvicorn の受信をブロックしている場合も接続できないため、許可ルールを確認してください。
 
 ## ハーネスベースのタスク生成
 

@@ -58,6 +58,7 @@ class SandboxConfig(BaseModel):
 class LoggingProxyConfig(BaseModel):
     listen_host: str = "127.0.0.1"
     listen_port: int = 5002
+    sandbox_host: str = "auto"
     capture_stream_chunks: bool = True
     capture_raw_request: bool = True
     capture_raw_response: bool = True
@@ -84,7 +85,7 @@ class HarnessRunConfig(BaseModel):
 
 class HarnessCompletionConfig(BaseModel):
     success_exit_codes: list[int] = Field(default_factory=lambda: [0])
-    max_idle_seconds: int = 120
+    max_idle_seconds: int = 600
     success_patterns: list[str] = Field(default_factory=list)
     failure_patterns: list[str] = Field(default_factory=list)
 

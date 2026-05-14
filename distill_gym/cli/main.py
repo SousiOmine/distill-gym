@@ -12,8 +12,10 @@ from distill_gym.storage.run_store import RunStore
 from distill_gym.exporters.openai_messages import export_openai_messages_jsonl
 from distill_gym.exporters.chatml import export_chatml_jsonl
 from distill_gym.proxy.app import create_proxy_app
+from distill_gym.proxy.addressing import proxy_listen_host_for_sandbox
 from distill_gym.proxy.recorder import TraceRecorder
 from distill_gym.cache.cache_store import get_artifacts_dir
+from distill_gym.platform.detection import detect
 from distill_gym.storage.db import get_db
 
 import uvicorn
@@ -101,10 +103,11 @@ def proxy(
         recorder = TraceRecorder(trace_path)
 
     proxy_app = create_proxy_app(cfg.provider, cfg.logging_proxy, recorder)
-    typer.echo(f"Starting proxy on {cfg.logging_proxy.listen_host}:{cfg.logging_proxy.listen_port}")
+    host = proxy_listen_host_for_sandbox(cfg, detect())
+    typer.echo(f"Starting proxy on {host}:{cfg.logging_proxy.listen_port}")
     uvicorn.run(
         proxy_app,
-        host=cfg.logging_proxy.listen_host,
+        host=host,
         port=cfg.logging_proxy.listen_port,
         log_level="info",
     )

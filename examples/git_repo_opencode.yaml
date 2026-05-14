@@ -16,8 +16,10 @@ provider:
   extra_body: {}
 
 logging_proxy:
+  # Windowsではサンドボックスから到達できるよう実行時に0.0.0.0へ補正されます。
   listen_host: 127.0.0.1
   listen_port: 5002
+  sandbox_host: auto
   capture_stream_chunks: true
   capture_raw_request: true
   capture_raw_response: true

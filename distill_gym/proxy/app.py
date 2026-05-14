@@ -5,6 +5,7 @@ from contextlib import asynccontextmanager
 
 import httpx
 from fastapi import FastAPI, Request, Response
+from fastapi.responses import JSONResponse
 from fastapi.responses import StreamingResponse
 
 from distill_gym.config.schema import LoggingProxyConfig, ProviderConfig
@@ -101,6 +102,9 @@ class ProxyApp:
 
         return StreamingResponse(stream_generator(), media_type="text/event-stream")
 
+    async def health(self) -> Response:
+        return JSONResponse({"status": "ok"})
+
 
 def create_proxy_app(
     provider: ProviderConfig,
@@ -115,5 +119,6 @@ def create_proxy_app(
         await proxy._client.aclose()
 
     app = FastAPI(lifespan=lifespan)
+    app.add_api_route("/health", proxy.health, methods=["GET"])
     app.add_api_route("/v1/chat/completions", proxy.chat_completions, methods=["POST"])
     return app
