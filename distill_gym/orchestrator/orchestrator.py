@@ -22,6 +22,8 @@ from distill_gym.collectors.artifact_collector import ArtifactCollector
 from distill_gym.collectors.git_diff import collect_git_diff, collect_changed_files
 from distill_gym.collectors.test_result import collect_test_result
 from distill_gym.cache.cache_store import get_artifacts_dir
+from distill_gym.platform.compatibility import ensure_podman_ready
+from distill_gym.platform.detection import detect
 
 import uvicorn
 import uuid
@@ -133,6 +135,9 @@ async def _execute_run(config: Config, plan: RunPlan, store: RunStore, dry_run: 
         )
 
         if needs_sandbox:
+            if config.sandbox.engine.value == "podman":
+                ensure_podman_ready(detect())
+
             builder = BuilderRegistry.create(config.sandbox.type)
             errors = builder.validate(config.sandbox)
             if errors:

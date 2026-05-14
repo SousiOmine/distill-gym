@@ -1,10 +1,13 @@
 import asyncio
 import json
+import logging
 import subprocess
 from typing import Optional
 
 from distill_gym.sandbox.base import SandboxSpec
 from distill_gym.sandbox.clients import ContainerClient
+
+logger = logging.getLogger(__name__)
 
 
 class DockerClient(ContainerClient):
@@ -19,8 +22,12 @@ class DockerClient(ContainerClient):
             )
         except FileNotFoundError as e:
             raise RuntimeError(f"Docker binary not found: {self.binary}") from e
+        except subprocess.CalledProcessError as e:
+            logger.error("Docker command failed: %s\nstderr: %s", " ".join(cmd), e.stderr)
+            raise
 
     async def container_run(self, spec: SandboxSpec) -> str:
+        await self._run(["rm", "-f", spec.container_name], check=False, timeout=30)
         args = ["run", "-d", "--name", spec.container_name]
         for k, v in spec.labels.items():
             args.extend(["--label", f"{k}={v}"])
@@ -40,7 +47,13 @@ class DockerClient(ContainerClient):
         args.extend(["--hostname", spec.hostname])
         args.append(spec.image)
         args.extend(spec.cmd)
-        result = await self._run(args, timeout=60)
+        try:
+            result = await self._run(args, timeout=60)
+        except subprocess.CalledProcessError as e:
+            detail = e.stderr.strip() or f"exit code {e.returncode}"
+            raise RuntimeError(
+                f"Failed to start container '{spec.container_name}': {detail}"
+            ) from e
         return result.stdout.strip()
 
     async def container_stop(self, container_id: str) -> None:
