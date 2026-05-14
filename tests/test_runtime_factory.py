@@ -1,6 +1,6 @@
 import pytest
 from distill_gym.sandbox.runtime import SandboxRuntime
-from distill_gym.sandbox.runtimes import create_runtime, PodmanSandboxRuntime
+from distill_gym.sandbox.runtimes import create_runtime, PodmanSandboxRuntime, DockerSandboxRuntime
 from distill_gym.sandbox.clients.podman import PodmanClient
 from distill_gym.sandbox.clients.docker import DockerClient
 
@@ -17,8 +17,7 @@ class TestRuntimeFactory:
 
     def test_create_docker_runtime(self):
         runtime = create_runtime("docker")
-        assert isinstance(runtime, PodmanSandboxRuntime)
-        from distill_gym.sandbox.clients.docker import DockerClient
+        assert isinstance(runtime, DockerSandboxRuntime)
         assert isinstance(runtime.client, DockerClient)
 
     def test_create_unknown_engine_raises(self):

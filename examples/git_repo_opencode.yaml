@@ -1,7 +1,7 @@
 version: 1
 
 run:
-  name: metasia-run
+  name: git_repo_opencode
   task_count: 3
   concurrency: 1
   timeout_minutes_per_task: 30
@@ -26,21 +26,13 @@ logging_proxy:
 sandbox:
   type: git_repository
   engine: podman
-  repo_url: https://github.com/SousiOmine/Metasia
-  ref: master
-  image: mcr.microsoft.com/dotnet/sdk:10.0
+  repo_url: https://github.com/example/project
+  ref: main
+  image: docker.io/library/python:3.12-bookworm
   workdir: /workspace/repo
-  setup:
-    - apt-get update && apt-get install -y nodejs npm
-  volumes:
-    - type: cache
-      name: nuget
-      target: /root/.nuget/packages
+  setup: []
   network:
     mode: proxy_only
-  env:
-    OPENAI_BASE_URL: http://host.containers.internal:5002/v1
-    OPENAI_API_KEY: dummy-key
 
 harness:
   type: opencode
@@ -49,14 +41,41 @@ harness:
     commands:
       - npm install -g opencode-ai
   run:
-    command: opencode run "{task.prompt}"
+    command: opencode run --format json {task.prompt.shell}
   completion:
     success_exit_codes: [0]
     max_idle_seconds: 120
 
 taskgen:
-  type: repo_auto
-  prompt_template: repo_bugfix_and_test_tasks
+  type: harness
+  output_file: .distill-gym/taskgen/tasks.json
+  batch_size: 2
+  max_rounds: 6
+  harness:
+    type: opencode
+    install:
+      strategy: command
+      commands:
+        - npm install -g opencode-ai
+    run:
+      command: opencode run --format json {task.prompt.shell}
+    completion:
+      success_exit_codes: [0]
+      max_idle_seconds: 120
+  prompts:
+    - id: bugfix
+      title: バグ修正タスク
+      prompt: |
+        このリポジトリを調査し、最大{batch_size}件の具体的なバグ修正タスクを生成してください。
+        以下の既存タスクと重複しないようにしてください: {existing_tasks_json}
+        JSON配列のみを{output_file}に書き込んでください。
+    - id: tests
+      title: テスト改善タスク
+      prompt: |
+        このリポジトリを調査し、最大{batch_size}件のテスト改善タスクを生成してください。
+        明確なプロジェクトのテストコマンドが存在する場合はtest_commandを含めてください。
+        以下の既存タスクと重複しないようにしてください: {existing_tasks_json}
+        JSON配列のみを{output_file}に書き込んでください。
 
 artifacts:
   collect:

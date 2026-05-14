@@ -6,15 +6,19 @@ from typing import Optional
 
 from distill_gym.sandbox.base import SandboxSpec
 from distill_gym.config.schema import SandboxConfig
-from distill_gym.sandbox.podman import PodmanClient
-from distill_gym.sandbox.podman_runtime import PodmanSandboxRuntime
 from distill_gym.sandbox.runtime import SandboxRuntime
+from distill_gym.sandbox.runtimes import create_runtime, auto_detect_runtime
 from distill_gym.cache.git_cache import clone_from_mirror
 
 
 class SandboxManager:
-    def __init__(self, podman: Optional[PodmanClient] = None, runtime: Optional[SandboxRuntime] = None):
-        self.runtime = runtime or PodmanSandboxRuntime(podman)
+    def __init__(self, runtime: Optional[SandboxRuntime] = None, engine: str = ""):
+        if runtime:
+            self.runtime = runtime
+        elif engine:
+            self.runtime = create_runtime(engine)
+        else:
+            self.runtime = auto_detect_runtime()
         self.container_id: Optional[str] = None
         self.temp_dir: Optional[Path] = None
         self.workdir: str = "/workspace"
@@ -175,7 +179,16 @@ class SandboxManager:
                     )
 
             elif step_type == "env_set":
-                pass
+                key = args.get("key", "")
+                value = args.get("value", "")
+                if key:
+                    await self.checked_exec(
+                        f"export {shlex.quote(key)}={shlex.quote(value)}",
+                        workdir="/", context=f"env_set {key}",
+                    )
+                    if not hasattr(self, "_env_vars"):
+                        self._env_vars = {}
+                    self._env_vars[key] = value
 
             else:
                 raise RuntimeError(f"Unknown build step type: {step_type}")

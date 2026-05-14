@@ -86,6 +86,23 @@ export const api = {
       body: JSON.stringify({ run_ids: runIds, format }),
     }),
 
+  listExamples: () =>
+    fetchJSON<string[]>('/config/examples'),
+
   loadExampleConfig: (name: string) =>
     fetchJSON<{ yaml: string }>(`/config/examples/${name}`),
+
+  uploadConfig: async (file: File) => {
+    const form = new FormData()
+    form.append('file', file)
+    const res = await fetch(`${API_BASE}/config/upload`, {
+      method: 'POST',
+      body: form,
+    })
+    if (!res.ok) {
+      const err = await res.text()
+      throw new Error(`Upload error ${res.status}: ${err}`)
+    }
+    return res.json() as Promise<{ yaml: string; filename: string }>
+  },
 }

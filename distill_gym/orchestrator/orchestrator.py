@@ -25,6 +25,7 @@ from distill_gym.cache.cache_store import get_artifacts_dir
 import uvicorn
 import uuid
 
+from distill_gym.sandbox.runtime import SandboxRuntime
 from distill_gym.sandbox.runtimes import create_runtime
 
 logger = logging.getLogger(__name__)
@@ -99,6 +100,7 @@ async def run(config: Config, dry_run: bool = False) -> str:
 
     proxy_base_url: Optional[str] = None
     sandbox_manager: Optional[SandboxManager] = None
+    sandbox_runtime: Optional[SandboxRuntime] = None
     proxy_server: Optional[uvicorn.Server] = None
     proxy_task: Optional[asyncio.Task] = None
     proxy_recorder: Optional[TraceRecorder] = None
@@ -132,14 +134,14 @@ async def run(config: Config, dry_run: bool = False) -> str:
                 raise ValueError(f"Sandbox config validation failed: {'; '.join(errors)}")
             spec = builder.build(config.sandbox)
 
+            sandbox_runtime = create_runtime(config.sandbox.engine.value)
             if config.sandbox.network.mode.value == "proxy_only":
                 network_name = f"distill-gym-{plan.run_id}"
-                runtime = create_runtime(config.sandbox.engine.value)
-                runtime.client.network_create(network_name)
+                sandbox_runtime.client.network_create(network_name)
                 created_network = network_name
                 spec.network_name = network_name
 
-            sandbox_manager = SandboxManager()
+            sandbox_manager = SandboxManager(runtime=sandbox_runtime)
             await sandbox_manager.start(spec)
             if spec.steps:
                 await sandbox_manager.execute_steps(spec)
@@ -298,9 +300,8 @@ async def run(config: Config, dry_run: bool = False) -> str:
 
     finally:
         try:
-            if created_network and sandbox_manager:
-                runtime = create_runtime(config.sandbox.engine.value)
-                runtime.client.network_rm(created_network)
+            if created_network and sandbox_runtime:
+                sandbox_runtime.client.network_rm(created_network)
         except Exception:
             logger.warning(f"Failed to remove network {created_network}", exc_info=True)
 

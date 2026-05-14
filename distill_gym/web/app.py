@@ -2,7 +2,7 @@ import json
 import tempfile
 from pathlib import Path
 
-from fastapi import FastAPI, Request, HTTPException
+from fastapi import FastAPI, Request, HTTPException, UploadFile, File
 from fastapi.responses import HTMLResponse, FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -225,6 +225,13 @@ def create_web_app() -> FastAPI:
         finally:
             await store.close()
 
+    @app.get("/api/config/examples")
+    async def api_list_examples():
+        examples_dir = Path(__file__).parent.parent.parent / "examples"
+        files = sorted(examples_dir.glob("*.yaml"))
+        names = [f.stem for f in files]
+        return names
+
     @app.get("/api/config/examples/{name}")
     async def api_config_example(name: str):
         examples_dir = Path(__file__).parent.parent.parent / "examples"
@@ -234,6 +241,11 @@ def create_web_app() -> FastAPI:
         if not path.exists():
             raise HTTPException(404, f"Example config not found: {name}")
         return {"yaml": path.read_text(encoding="utf-8")}
+
+    @app.post("/api/config/upload")
+    async def api_upload_config(file: UploadFile = File(...)):
+        content = await file.read()
+        return {"yaml": content.decode("utf-8"), "filename": file.filename}
 
     # --- Static files (React SPA) ---
 

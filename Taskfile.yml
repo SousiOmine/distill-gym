@@ -1,0 +1,67 @@
+version: "3"
+
+vars:
+  FRONTEND_DIR: distill_gym/web/frontend
+  STATIC_DIR: distill_gym/web/static
+
+tasks:
+  default:
+    desc: Build frontend and install package (one-shot)
+    deps: [build]
+
+  build:
+    desc: Build frontend then install Python package
+    cmds:
+      - task: build-frontend
+      - task: install
+
+  build-frontend:
+    desc: Install npm dependencies and build React SPA
+    dir: "{{.FRONTEND_DIR}}"
+    cmds:
+      - npm install
+      - npm run build
+    sources:
+      - src/**/*
+      - package.json
+      - vite.config.ts
+      - tsconfig.json
+    generates:
+      - "../static/**"
+
+  install:
+    desc: Install Python package in development mode
+    cmds:
+      - uv pip install -e .
+
+  dev:
+    desc: Start web UI server
+    cmds:
+      - task: build-frontend
+      - uv run distill-gym web --host 127.0.0.1 --port 8000
+
+  dev-frontend:
+    desc: Start frontend dev server with HMR
+    dir: "{{.FRONTEND_DIR}}"
+    cmds:
+      - npm run dev
+
+  clean:
+    desc: Remove all build artifacts
+    cmds:
+      - rm -rf "{{.STATIC_DIR}}"
+      - rm -rf "{{.FRONTEND_DIR}}/node_modules"
+      - rm -rf "{{.FRONTEND_DIR}}/dist"
+      - find . -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true
+
+  test:
+    desc: Run test suite
+    cmds:
+      - uv pip install -e ".[dev]"
+      - uv run pytest
+
+  lint:
+    desc: Run ruff linter
+    cmds:
+      - uv pip install -e ".[dev]"
+      - uv run ruff check .

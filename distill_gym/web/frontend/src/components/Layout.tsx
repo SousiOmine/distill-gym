@@ -5,9 +5,9 @@ export function Layout() {
     <div style={{ maxWidth: 1200, margin: '0 auto', padding: '1rem', fontFamily: 'system-ui, sans-serif' }}>
       <nav style={{ display: 'flex', gap: '1rem', padding: '0.5rem 0', borderBottom: '2px solid #eee', marginBottom: '1rem' }}>
         <Link to="/" style={{ fontWeight: 700, color: '#333', textDecoration: 'none' }}>distill-gym</Link>
-        <Link to="/" style={{ color: '#555' }}>Runs</Link>
-        <Link to="/new" style={{ color: '#555' }}>New Run</Link>
-        <Link to="/export" style={{ color: '#555' }}>Export</Link>
+        <Link to="/" style={{ color: '#555' }}>実行一覧</Link>
+        <Link to="/new" style={{ color: '#555' }}>新規実行</Link>
+        <Link to="/export" style={{ color: '#555' }}>エクスポート</Link>
       </nav>
       <main>
         <Outlet />

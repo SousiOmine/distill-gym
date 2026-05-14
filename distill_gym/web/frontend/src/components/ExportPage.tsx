@@ -36,7 +36,7 @@ export function ExportPage() {
         setResult(res)
       }
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : 'Export failed')
+      setError(err instanceof Error ? err.message : 'エクスポートに失敗しました')
     } finally {
       setExporting(false)
     }
@@ -44,10 +44,10 @@ export function ExportPage() {
 
   return (
     <div>
-      <h2>Export Dataset</h2>
+      <h2>データセットエクスポート</h2>
 
       <div style={{ marginBottom: '1rem' }}>
-        <label style={{ fontWeight: 600 }}>Format:</label>
+        <label style={{ fontWeight: 600 }}>形式:</label>
         <select value={format} onChange={e => setFormat(e.target.value)}
           style={{ marginLeft: '0.5rem', padding: '0.25rem' }}>
           <option value="openai-messages">OpenAI Messages</option>
@@ -58,12 +58,12 @@ export function ExportPage() {
       <div style={{ marginBottom: '1rem' }}>
         <label>
           <input type="checkbox" checked={includeFailed} onChange={e => setIncludeFailed(e.target.checked)} />
-          {' '}Include failed runs
+          {' '}失敗した実行も含める
         </label>
       </div>
 
-      <h3>Select Runs</h3>
-      {runs.length === 0 && <p>No runs available.</p>}
+      <h3>実行を選択</h3>
+      {runs.length === 0 && <p>実行がありません。</p>}
       <div style={{ maxHeight: 300, overflow: 'auto', border: '1px solid #ddd', borderRadius: 4, padding: '0.5rem' }}>
         {runs.map(run => (
           <label key={run.id} style={{ display: 'block', padding: '0.25rem 0' }}>
@@ -91,14 +91,14 @@ export function ExportPage() {
           cursor: exporting ? 'not-allowed' : 'pointer',
         }}
       >
-        {exporting ? 'Exporting...' : `Export ${selected.length} run(s)`}
+        {exporting ? 'エクスポート中...' : `${selected.length}件の実行をエクスポート`}
       </button>
 
       {error && <p style={{ color: 'red' }}>{error}</p>}
       {result && (
         <p style={{ color: '#2e7d32' }}>
-          Exported {result.count} conversations.
-          {result.url && <> <a href={result.url}>Download</a></>}
+          {result.count}件の会話をエクスポートしました。
+          {result.url && <> <a href={result.url}>ダウンロード</a></>}
         </p>
       )}
     </div>

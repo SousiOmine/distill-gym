@@ -1,7 +1,7 @@
 version: 1
 
 run:
-  name: harness-taskgen-opencode-run
+  name: app_idea_generation
   task_count: 3
   concurrency: 1
   timeout_minutes_per_task: 30
@@ -24,13 +24,14 @@ logging_proxy:
   normalize_reasoning: true
 
 sandbox:
-  type: git_repository
+  type: custom
   engine: podman
-  repo_url: https://github.com/example/project
-  ref: main
   image: docker.io/library/python:3.12-bookworm
-  workdir: /workspace/repo
-  setup: []
+  workdir: /workspace
+  steps:
+    - type: run
+      args:
+        command: apt-get update -qq && apt-get install -y -qq nodejs npm
   network:
     mode: proxy_only
 
@@ -49,7 +50,7 @@ harness:
 taskgen:
   type: harness
   output_file: .distill-gym/taskgen/tasks.json
-  batch_size: 2
+  batch_size: 3
   max_rounds: 6
   harness:
     type: opencode
@@ -63,27 +64,26 @@ taskgen:
       success_exit_codes: [0]
       max_idle_seconds: 120
   prompts:
-    - id: bugfix
-      title: Bugfix tasks
+    - id: app_idea
+      title: Pythonアプリ案の生成
       prompt: |
-        Inspect this repository and generate up to {batch_size} concrete bugfix tasks.
-        Avoid duplicating these existing tasks: {existing_tasks_json}
-        Write only the JSON array to {output_file}.
-    - id: tests
-      title: Test coverage tasks
-      prompt: |
-        Inspect this repository and generate up to {batch_size} focused test-improvement tasks.
-        Include test_command when a clear project test command exists.
-        Avoid duplicating these existing tasks: {existing_tasks_json}
-        Write only the JSON array to {output_file}.
+        空のワークスペースで1つの.pyファイルとして実装可能な、
+        クリエイティブでシンプルなPythonアプリケーション案を{batch_size}個生成してください。
+        各案は以下のJSON形式で返してください：
+        - id: 短いkebab-case識別子（例："weather-cli"）
+        - title: 簡潔なアプリ名
+        - prompt: AIコーディングエージェント向けの詳細な手順。
+          アプリの実装、実行、出力表示までのステップを含めること
+        - test_command: アプリを実行するシェルコマンド（例："python app.py"）
+        以下の既存タスクと重複しないようにしてください: {existing_tasks_json}
+        JSON配列のみを{output_file}に書き込んでください。
 
 artifacts:
   collect:
-    - git_diff
     - stdout
     - stderr
-    - test_results
     - files_changed
+    - test_results
 
 export:
   formats:
