@@ -51,7 +51,6 @@ export function ExportPage() {
         <select value={format} onChange={e => setFormat(e.target.value)}
           style={{ marginLeft: '0.5rem', padding: '0.25rem' }}>
           <option value="openai-messages">OpenAI Messages</option>
-          <option value="chatml">ChatML</option>
         </select>
       </div>
 

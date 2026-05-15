@@ -10,7 +10,6 @@ from distill_gym.config.schema import Config
 from distill_gym.orchestrator.orchestrator import run as run_orch, cleanup as cleanup_orch
 from distill_gym.storage.run_store import RunStore
 from distill_gym.exporters.openai_messages import export_openai_messages_jsonl
-from distill_gym.exporters.chatml import export_chatml_jsonl
 from distill_gym.proxy.app import create_proxy_app
 from distill_gym.proxy.addressing import proxy_listen_host_for_sandbox
 from distill_gym.proxy.recorder import TraceRecorder
@@ -121,15 +120,13 @@ def merge(
 ):
     """Merge multiple runs into a single dataset"""
     async def _merge():
-        from distill_gym.exporters.merger import merge_runs_to_jsonl, merge_runs_to_chatml
+        from distill_gym.exporters.merger import merge_runs_to_jsonl
         store = RunStore()
         try:
             ids = [r.strip() for r in run_ids.split(",")]
             output_path = Path(output)
             if format == "openai-messages":
                 count = await merge_runs_to_jsonl(ids, output_path, store)
-            elif format == "chatml":
-                count = await merge_runs_to_chatml(ids, output_path, store)
             else:
                 typer.echo(f"Unknown format: {format}", err=True)
                 raise typer.Exit(code=1)
@@ -156,12 +153,6 @@ def export(
                     include_reasoning=True, include_tool_results=True, include_failed=False,
                 )
                 typer.echo(f"Exported {count} conversations to {output_path}")
-            elif format == "chatml":
-                count = await export_chatml_jsonl(
-                    run_id=run_id, output=output_path, store=store,
-                    include_reasoning=True, include_tool_results=True, include_failed=False,
-                )
-                typer.echo(f"Exported {count} ChatML conversations to {output_path}")
             else:
                 typer.echo(f"Unknown format: {format}", err=True)
                 raise typer.Exit(code=1)

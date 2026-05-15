@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 
 from distill_gym.storage.run_store import RunStore
 from distill_gym.storage.models import RunRecord, TaskRecord
-from distill_gym.exporters.merger import merge_runs_to_jsonl, merge_runs_to_chatml
+from distill_gym.exporters.merger import merge_runs_to_jsonl
 
 
 @pytest.fixture
@@ -58,29 +58,6 @@ async def test_merge_multiple_runs(mem_store):
     try:
         count = await merge_runs_to_jsonl(["run-a", "run-b"], output, store)
         assert count == 2
-    finally:
-        if output.exists():
-            output.unlink()
-
-
-@pytest.mark.asyncio
-async def test_merge_chatml(mem_store):
-    store = mem_store
-    run = RunRecord(
-        id="chatml-merge", name="chatml", config_yaml="", status="completed",
-        created_at=datetime.now(timezone.utc), updated_at=datetime.now(timezone.utc),
-    )
-    await store.create_run(run)
-    await store.create_task(TaskRecord(id="ct1", run_id="chatml-merge", title="t", prompt="p", status="completed", success=True))
-
-    output = Path("test_merge_chatml.jsonl")
-    try:
-        count = await merge_runs_to_chatml(["chatml-merge"], output, store)
-        assert count == 1
-        with open(output) as f:
-            line = json.loads(f.readline())
-            assert "text" in line
-            assert "source_run_id" in line
     finally:
         if output.exists():
             output.unlink()

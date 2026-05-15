@@ -196,7 +196,6 @@ def create_web_app() -> FastAPI:
     @app.post("/api/export")
     async def api_export(req: ExportRequest):
         from distill_gym.exporters.openai_messages import export_openai_messages_jsonl
-        from distill_gym.exporters.chatml import export_chatml_jsonl
 
         tmp = tempfile.NamedTemporaryFile(suffix=".jsonl", delete=False)
         tmp.close()
@@ -205,11 +204,6 @@ def create_web_app() -> FastAPI:
             path = Path(tmp.name)
             if req.format == "openai-messages":
                 count = await export_openai_messages_jsonl(
-                    req.run_id, path, store,
-                    include_failed=req.include_failed,
-                )
-            elif req.format == "chatml":
-                count = await export_chatml_jsonl(
                     req.run_id, path, store,
                     include_failed=req.include_failed,
                 )
@@ -232,7 +226,7 @@ def create_web_app() -> FastAPI:
 
     @app.post("/api/export/merge")
     async def api_merge_export(req: MergeExportRequest):
-        from distill_gym.exporters.merger import merge_runs_to_jsonl, merge_runs_to_chatml
+        from distill_gym.exporters.merger import merge_runs_to_jsonl
 
         tmp = tempfile.NamedTemporaryFile(suffix=".jsonl", delete=False)
         tmp.close()
@@ -241,8 +235,6 @@ def create_web_app() -> FastAPI:
             path = Path(tmp.name)
             if req.format == "openai-messages":
                 count = await merge_runs_to_jsonl(req.run_ids, path, store)
-            elif req.format == "chatml":
-                count = await merge_runs_to_chatml(req.run_ids, path, store)
             else:
                 raise HTTPException(400, f"Unknown format: {req.format}")
             return {"count": count, "url": f"/api/download/{path.name}"}
