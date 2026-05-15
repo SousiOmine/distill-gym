@@ -5,7 +5,7 @@ import { api, Run, Task, Artifact } from '../api/client'
 const STATUS_LABELS: Record<string, string> = {
   completed: '完了',
   failed: '失敗',
-  running: '実行中',
+  running: 'Running',
   pending: '待機中',
 }
 
@@ -70,11 +70,11 @@ export function TaskDetailPage() {
 
   if (loading) return <p>読み込み中...</p>
   if (error) return <p style={{ color: 'red' }}>{error}</p>
-  if (!task) return <p>タスクが見つかりません</p>
+  if (!task) return <p>Taskが見つかりません</p>
 
   return (
     <div>
-      <Link to={`/runs/${runId}`}>← 実行に戻る</Link>
+      <Link to={`/runs/${runId}`}>← Runに戻る</Link>
       <h2>{task.title || task.id}</h2>
       <table style={{ borderCollapse: 'collapse', width: '100%' }}>
         <tbody>

@@ -51,6 +51,13 @@ export interface Task {
   finished_at: string | null
 }
 
+export interface BatchRunResult {
+  run_id: string | null
+  name: string
+  status: string
+  error?: string
+}
+
 export interface Artifact {
   id: string
   task_id: string
@@ -79,6 +86,12 @@ export const api = {
     fetchJSON<{ run_id: string }>('/runs', {
       method: 'POST',
       body: JSON.stringify({ config_yaml: config }),
+    }),
+
+  createRunsBatch: (configs: string[]) =>
+    fetchJSON<{ runs: BatchRunResult[] }>('/runs/batch', {
+      method: 'POST',
+      body: JSON.stringify({ config_yamls: configs }),
     }),
 
   exportRun: (runId: string, format: string, includeFailed: boolean) =>

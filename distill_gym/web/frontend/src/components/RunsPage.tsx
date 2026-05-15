@@ -5,7 +5,7 @@ import { api, Run } from '../api/client'
 const STATUS_LABELS: Record<string, string> = {
   completed: '完了',
   failed: '失敗',
-  running: '実行中',
+  running: 'Running',
   pending: '待機中',
 }
 
@@ -54,12 +54,12 @@ export function RunsPage() {
   return (
     <div>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
-        <h2 style={{ margin: 0 }}>実行一覧</h2>
+        <h2 style={{ margin: 0 }}>Run一覧</h2>
         <button onClick={fetchRuns} style={{ padding: '0.3rem 0.8rem', cursor: 'pointer' }}>
           再読み込み
         </button>
       </div>
-      {runs.length === 0 && <p>まだ実行がありません。<Link to="/new">新規作成</Link></p>}
+      {runs.length === 0 && <p>まだRunがありません。<Link to="/new">新規作成</Link></p>}
       <table style={{ width: '100%', borderCollapse: 'collapse' }}>
         <thead>
           <tr style={{ textAlign: 'left', borderBottom: '2px solid #ddd' }}>

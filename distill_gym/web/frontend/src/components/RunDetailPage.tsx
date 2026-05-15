@@ -5,7 +5,7 @@ import { api, Run, Task, Artifact } from '../api/client'
 const STATUS_LABELS: Record<string, string> = {
   completed: '完了',
   failed: '失敗',
-  running: '実行中',
+  running: 'Running',
   pending: '待機中',
 }
 
@@ -77,7 +77,7 @@ export function RunDetailPage() {
 
   if (loading) return <p>読み込み中...</p>
   if (error) return <p style={{ color: 'red' }}>{error}</p>
-  if (!run) return <p>実行が見つかりません</p>
+  if (!run) return <p>Runが見つかりません</p>
 
   const taskProgress = tasks.length > 0
     ? `${tasks.filter(t => t.status === 'completed' || t.status === 'failed').length} / ${tasks.length}`
@@ -85,7 +85,7 @@ export function RunDetailPage() {
 
   return (
     <div>
-      <Link to="/">← 実行一覧に戻る</Link>
+      <Link to="/">← Run一覧に戻る</Link>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <h2>{run.name}</h2>
         <button onClick={fetchData} style={{ padding: '0.3rem 0.8rem', cursor: 'pointer' }}>
@@ -106,7 +106,7 @@ export function RunDetailPage() {
             ['コミット', run.commit_hash || '-'],
             ['成功', run.success === null ? '-' : run.success ? 'はい' : 'いいえ'],
             ['作成日時', new Date(run.created_at).toLocaleString()],
-            ['タスク進捗', taskProgress],
+            ['Task進捗', taskProgress],
           ].map(([label, value]) => (
             <tr key={label} style={{ borderBottom: '1px solid #eee' }}>
               <td style={{ fontWeight: 600, padding: '0.3rem 0.5rem', width: 140 }}>{label}</td>
@@ -122,7 +122,7 @@ export function RunDetailPage() {
         </div>
       )}
 
-      <h3>タスク ({tasks.length})</h3>
+      <h3>Task ({tasks.length})</h3>
       {tasks.length > 0 && (
         <div style={{ background: '#e8f5e9', borderRadius: 4, padding: '0.3rem 0.6rem', marginBottom: '0.5rem', fontSize: '0.85rem' }}>
           進捗: {taskProgress}

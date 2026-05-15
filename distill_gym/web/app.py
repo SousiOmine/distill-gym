@@ -176,6 +176,44 @@ def create_web_app() -> FastAPI:
         finally:
             Path(tmp.name).unlink(missing_ok=True)
 
+    class CreateRunsBatchRequest(BaseModel):
+        config_yamls: list[str]
+
+    @app.post("/api/runs/batch")
+    async def api_create_runs_batch(req: CreateRunsBatchRequest):
+        from distill_gym.config.loader import load_config
+        from distill_gym.orchestrator.orchestrator import _setup_run
+
+        results: list[dict] = []
+        for config_yaml in req.config_yamls:
+            tmp = tempfile.NamedTemporaryFile(
+                mode="w", suffix=".yaml", delete=False, encoding="utf-8",
+            )
+            try:
+                tmp.write(config_yaml)
+                tmp.flush()
+                tmp.close()
+                cfg = load_config(tmp.name)
+                plan, store = await _setup_run(cfg)
+                await store.close()
+                asyncio.create_task(_run_background(cfg, plan))
+                results.append({
+                    "run_id": plan.run_id,
+                    "name": cfg.run.name,
+                    "status": "submitted",
+                })
+            except Exception as e:
+                logger.exception("Batch run submission failed")
+                results.append({
+                    "run_id": None,
+                    "name": "",
+                    "status": "error",
+                    "error": str(e),
+                })
+            finally:
+                Path(tmp.name).unlink(missing_ok=True)
+        return {"runs": results}
+
 
     async def _run_background(config, plan):
         from distill_gym.orchestrator.orchestrator import _execute_run

@@ -57,12 +57,12 @@ export function ExportPage() {
       <div style={{ marginBottom: '1rem' }}>
         <label>
           <input type="checkbox" checked={includeFailed} onChange={e => setIncludeFailed(e.target.checked)} />
-          {' '}失敗した実行も含める
+          {' '}          失敗したRunも含める
         </label>
       </div>
 
-      <h3>実行を選択</h3>
-      {runs.length === 0 && <p>実行がありません。</p>}
+      <h3>Runを選択</h3>
+      {runs.length === 0 && <p>Runがありません。</p>}
       <div style={{ maxHeight: 300, overflow: 'auto', border: '1px solid #ddd', borderRadius: 4, padding: '0.5rem' }}>
         {runs.map(run => (
           <label key={run.id} style={{ display: 'block', padding: '0.25rem 0' }}>
@@ -90,7 +90,7 @@ export function ExportPage() {
           cursor: exporting ? 'not-allowed' : 'pointer',
         }}
       >
-        {exporting ? 'エクスポート中...' : `${selected.length}件の実行をエクスポート`}
+        {exporting ? 'エクスポート中...' : `${selected.length}件のRunをエクスポート`}
       </button>
 
       {error && <p style={{ color: 'red' }}>{error}</p>}
