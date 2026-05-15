@@ -84,4 +84,3 @@ class TestCustomSandboxBuilder:
         builder = CustomSandboxBuilder()
         spec = builder.build(config)
         assert spec.labels.get("distill-gym") == "true"
-        assert spec.labels.get("distill-gym-builder") == "custom"

@@ -1,7 +1,7 @@
 import pytest
 from distill_gym.registry.builder_registry import BuilderRegistry
 from distill_gym.sandbox.builders.base import SandboxBuilder
-from distill_gym.sandbox.builders.git_repository import GitRepositorySandboxBuilder
+from distill_gym.sandbox.builders.custom import CustomSandboxBuilder
 
 
 class TestBuilderRegistry:
@@ -17,13 +17,13 @@ class TestBuilderRegistry:
 
     def test_list_types(self):
         types = BuilderRegistry.list_types()
-        assert "git_repository" in types
+        assert "custom" in types
 
-    def test_git_repository_is_registered(self):
-        cls = BuilderRegistry.get("git_repository")
+    def test_custom_is_registered(self):
+        cls = BuilderRegistry.get("custom")
         assert cls is not None
-        assert cls is GitRepositorySandboxBuilder
+        assert cls is CustomSandboxBuilder
 
     def test_decorator_preserves_class(self):
-        cls = BuilderRegistry.get("git_repository")
-        assert cls is GitRepositorySandboxBuilder
+        cls = BuilderRegistry.get("custom")
+        assert cls is CustomSandboxBuilder

@@ -26,7 +26,6 @@ class TemplateTaskGenerator(TaskGenerator):
     def __init__(self, config: TaskGenConfig, **kwargs):
         self.config = config
         self._provider_config = kwargs.get("provider_config")
-        self._sandbox_config = kwargs.get("sandbox_config")
 
     async def generate(self, count: int, run_id: str = "") -> list[TaskItem]:
         if self.config.tasks:
@@ -62,10 +61,6 @@ class TemplateTaskGenerator(TaskGenerator):
                 text = await provider.get_context(item.get("config"))
                 if text:
                     context_parts.append(text)
-
-        if self._sandbox_config and self._sandbox_config.repo_url:
-            context_parts.append(f"Repository URL: {self._sandbox_config.repo_url}")
-            context_parts.append(f"Working directory: {self._sandbox_config.workdir}")
 
         return "\n\n".join(context_parts)
 

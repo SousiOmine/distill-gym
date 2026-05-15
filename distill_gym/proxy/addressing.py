@@ -2,6 +2,7 @@ import json
 import logging
 import re
 import subprocess
+from urllib.parse import quote, urlparse, urlunparse
 
 from distill_gym.config.schema import Config
 from distill_gym.platform.detection import PlatformInfo
@@ -36,6 +37,24 @@ def proxy_connect_host_for_sandbox(config: Config, platform: PlatformInfo) -> st
 def proxy_base_url_for_sandbox(config: Config, platform: PlatformInfo) -> str:
     host = proxy_connect_host_for_sandbox(config, platform)
     return f"http://{host}:{config.logging_proxy.listen_port}/v1"
+
+
+def proxy_base_url_for_task(base_url: str, task_id: str) -> str:
+    parsed = urlparse(base_url)
+    base_path = parsed.path.rstrip("/")
+    if base_path.endswith("/v1"):
+        prefix = base_path[:-3]
+    else:
+        prefix = base_path
+    task_path = f"{prefix}/tasks/{quote(task_id, safe='')}/v1"
+    return urlunparse((
+        parsed.scheme,
+        parsed.netloc,
+        task_path,
+        parsed.params,
+        parsed.query,
+        parsed.fragment,
+    ))
 
 
 def _windows_podman_connect_host() -> str:

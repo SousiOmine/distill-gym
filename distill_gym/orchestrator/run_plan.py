@@ -22,7 +22,7 @@ class RunPlan:
         if config.taskgen.type == "harness":
             return cls(run_id=run_id, config=config, tasks=[])
 
-        gen = RepoTaskGenerator(config.taskgen, config.sandbox, config.provider)
+        gen = RepoTaskGenerator(config.taskgen, repo_url=config.run.repo_url, ref=config.run.ref, provider_config=config.provider)
         tasks = await gen.generate(config.run.task_count)
         return cls(run_id=run_id, config=config, tasks=tasks)
 
@@ -39,7 +39,7 @@ class RunPlan:
             model=self.config.provider.model,
             sandbox_type=self.config.sandbox.type,
             sandbox_engine=self.config.sandbox.engine.value,
-            repo_url=self.config.sandbox.repo_url,
+            repo_url=self.config.run.repo_url,
         )
 
     def to_task_records(self) -> list[TaskRecord]:

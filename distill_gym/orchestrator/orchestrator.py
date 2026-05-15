@@ -11,19 +11,26 @@ from urllib.parse import urlparse, urlunparse
 from distill_gym.config.schema import Config, CleanupPolicy, HarnessConfig, ProviderConfig
 from distill_gym.orchestrator.run_plan import RunPlan
 from distill_gym.orchestrator.events import EventBus, get_event_bus
+from distill_gym.harness.base import HarnessResult
+from distill_gym.orchestrator.task_worker import TaskWorker, TaskResult
+from distill_gym.orchestrator.trace_pipeline import TracePipeline
 from distill_gym.storage.run_store import RunStore
 from distill_gym.storage.models import TaskRecord, ArtifactRecord
 from distill_gym.proxy.recorder import TraceRecorder
 from distill_gym.proxy.app import create_proxy_app
-from distill_gym.proxy.addressing import proxy_base_url_for_sandbox, proxy_listen_host_for_sandbox
+from distill_gym.proxy.addressing import (
+    proxy_base_url_for_sandbox,
+    proxy_base_url_for_task,
+    proxy_listen_host_for_sandbox,
+)
 from distill_gym.registry.harness_registry import HarnessRegistry
 from distill_gym.registry.builder_registry import BuilderRegistry
-import distill_gym.sandbox.builders  # noqa: F401  - triggers BuilderRegistry registration
+import distill_gym.sandbox.builders  # noqa: F401
 from distill_gym.sandbox.manager import SandboxManager
+from distill_gym.sandbox.pool import SandboxPool
+from distill_gym.sandbox.isolation import ContainerIsolation
 from distill_gym.taskgen.harness_task_generator import HarnessTaskGenerator
 from distill_gym.collectors.artifact_collector import ArtifactCollector
-from distill_gym.collectors.git_diff import collect_git_diff, collect_changed_files
-from distill_gym.collectors.test_result import collect_test_result
 from distill_gym.cache.cache_store import get_artifacts_dir
 from distill_gym.platform.compatibility import ensure_podman_ready
 from distill_gym.platform.detection import detect
@@ -98,6 +105,10 @@ def _proxy_health_url(proxy_base_url: str) -> str:
     return urlunparse((parsed.scheme, parsed.netloc, "/health", "", "", ""))
 
 
+def _effective_concurrency(config: Config) -> int:
+    return max(1, config.run.concurrency)
+
+
 async def _ensure_proxy_reachable_from_sandbox(
     sandbox_manager: SandboxManager,
     proxy_base_url: str,
@@ -150,6 +161,7 @@ async def _setup_run(config: Config) -> tuple[RunPlan, RunStore]:
 
 async def _execute_run(config: Config, plan: RunPlan, store: RunStore, dry_run: bool = False) -> str:
     event_bus = get_event_bus()
+    concurrency = _effective_concurrency(config)
 
     tasks_registered = False
     if plan.tasks:
@@ -162,12 +174,12 @@ async def _execute_run(config: Config, plan: RunPlan, store: RunStore, dry_run: 
         return plan.run_id
 
     proxy_base_url: Optional[str] = None
-    sandbox_manager: Optional[SandboxManager] = None
     sandbox_runtime: Optional[SandboxRuntime] = None
     proxy_server: Optional[uvicorn.Server] = None
     proxy_task: Optional[asyncio.Task] = None
     proxy_recorder: Optional[TraceRecorder] = None
     created_network: str = ""
+    pool: Optional[SandboxPool] = None
 
     try:
         needs_taskgen = _needs_harness_taskgen(config)
@@ -219,157 +231,73 @@ async def _execute_run(config: Config, plan: RunPlan, store: RunStore, dry_run: 
                 created_network = network_name
                 spec.network_name = network_name
 
-            sandbox_manager = SandboxManager(runtime=sandbox_runtime)
-            await sandbox_manager.start(spec)
-            if spec.steps:
-                await sandbox_manager.execute_steps(spec)
-            else:
-                await sandbox_manager.prepare_git_repository(config.sandbox)
-            commit_code, commit_stdout, _ = await sandbox_manager.exec("git rev-parse HEAD", timeout=30)
-            if commit_code == 0:
-                await store.update_run(plan.run_id, commit_hash=commit_stdout.strip())
+            pool = SandboxPool(
+                runtime=sandbox_runtime,
+                spec_template=spec,
+                max_size=concurrency,
+                init_hook=harness.install if config.harness.type != "mock" else None,
+            )
 
-            if proxy_base_url:
-                await _ensure_proxy_reachable_from_sandbox(sandbox_manager, proxy_base_url)
+            setup_sandbox = await pool.acquire()
+            try:
+                commit_code, commit_stdout, _ = await setup_sandbox.exec("git rev-parse HEAD", timeout=30)
+                if commit_code == 0:
+                    await store.update_run(plan.run_id, commit_hash=commit_stdout.strip())
+
+                if proxy_base_url:
+                    await _ensure_proxy_reachable_from_sandbox(setup_sandbox, proxy_base_url)
+            finally:
+                await pool.release(setup_sandbox)
 
         if needs_taskgen:
-            if sandbox_manager is None:
+            if pool is None:
                 raise RuntimeError("task generation requires a sandbox")
-            taskgen_harness = _make_harness_from_config(
-                config.taskgen.harness,
-                provider=config.provider,
-                proxy_base_url=proxy_base_url,
-            )
-            await taskgen_harness.install(sandbox_manager)
-            taskgen = HarnessTaskGenerator(config.taskgen, taskgen_harness, sandbox_manager)
-            plan.tasks = await taskgen.generate(config.run.task_count, plan.run_id)
-            await taskgen.cleanup_output_file()
+            taskgen_sandbox = await pool.acquire()
+            try:
+                taskgen_harness = _make_harness_from_config(
+                    config.taskgen.harness,
+                    provider=config.provider,
+                    proxy_base_url=proxy_base_url,
+                )
+                await taskgen_harness.install(taskgen_sandbox)
+                taskgen = HarnessTaskGenerator(config.taskgen, taskgen_harness, taskgen_sandbox)
+                plan.tasks = await taskgen.generate(config.run.task_count, plan.run_id)
+                await taskgen.cleanup_output_file()
+            finally:
+                await pool.release(taskgen_sandbox)
 
         if not tasks_registered:
             for tr in plan.to_task_records():
                 await store.create_task(tr)
             tasks_registered = True
 
-        if config.harness.type != "mock":
-            await harness.install(sandbox_manager)
+        if config.harness.type == "mock":
+            await store.update_run(plan.run_id, status="running")
+            await event_bus.emit("run_started", run_id=plan.run_id)
+            results = await _run_tasks_mock(plan, store, event_bus)
+        else:
+            if pool is None:
+                raise RuntimeError("sandbox pool not initialized")
+            isolation = ContainerIsolation(pool)
+            trace_pipeline = TracePipeline(proxy_recorder, plan.run_id)
 
-        await store.update_run(plan.run_id, status="running")
-        await event_bus.emit("run_started", run_id=plan.run_id)
-
-        task_failed = False
-        for task in plan.tasks:
-            db_task_id = f"{plan.run_id}_{task.id}"
-            await store.update_task(
-                db_task_id, status="running",
-                started_at=datetime.now(timezone.utc).isoformat(),
+            await store.update_run(plan.run_id, status="running")
+            await event_bus.emit("run_started", run_id=plan.run_id)
+            results = await _run_tasks_concurrent(
+                config, plan, store, isolation, trace_pipeline, concurrency, event_bus,
+                proxy_base_url,
             )
-            await event_bus.emit("task_started", run_id=plan.run_id, task_id=task.id, title=task.title)
 
-            try:
-                raw_trace_path = get_artifacts_dir() / plan.run_id / task.id / "raw_trace.jsonl"
-                recorder = proxy_recorder or TraceRecorder(raw_trace_path)
-                recorder.path = raw_trace_path
-                recorder.record_event("task_started", {"task_id": task.id, "title": task.title}, db_task_id)
+            await trace_pipeline.distribute()
 
-                result = await harness.run_task(sandbox_manager, task)
-
-                recorder.record_event("task_finished", {
-                    "exit_code": result.exit_code,
-                    "success": result.success,
-                }, db_task_id)
-
-                collector = ArtifactCollector(plan.run_id, task.id)
-                artifacts_base = get_artifacts_dir()
-
-                def _rel_path(p: Path) -> str:
-                    try:
-                        return str(p.relative_to(artifacts_base).as_posix())
-                    except ValueError:
-                        return p.name
-
-                stdout_path = collector.save_text("stdout", result.stdout)
-                stderr_path = collector.save_text("stderr", result.stderr)
-                if raw_trace_path.exists():
-                    await store.create_artifact(ArtifactRecord(
-                        id=str(uuid.uuid4()), task_id=db_task_id, run_id=plan.run_id,
-                        kind="raw_trace", path=_rel_path(raw_trace_path), size=raw_trace_path.stat().st_size,
-                    ))
-
-                await store.create_artifact(ArtifactRecord(
-                    id=str(uuid.uuid4()), task_id=db_task_id, run_id=plan.run_id,
-                    kind="stdout", path=_rel_path(stdout_path), size=stdout_path.stat().st_size,
-                ))
-                await store.create_artifact(ArtifactRecord(
-                    id=str(uuid.uuid4()), task_id=db_task_id, run_id=plan.run_id,
-                    kind="stderr", path=_rel_path(stderr_path), size=stderr_path.stat().st_size,
-                ))
-
-                if sandbox_manager:
-                    changed_files = await collect_changed_files(sandbox_manager)
-                    if changed_files:
-                        changed_files_path = collector.save_json("changed_files", changed_files)
-                        await store.create_artifact(ArtifactRecord(
-                            id=str(uuid.uuid4()), task_id=db_task_id, run_id=plan.run_id,
-                            kind="changed_files", path=_rel_path(changed_files_path), size=changed_files_path.stat().st_size,
-                        ))
-
-                    diff = await collect_git_diff(sandbox_manager)
-                    if diff:
-                        diff_path = collector.save_text("final", diff)
-                        await store.create_artifact(ArtifactRecord(
-                            id=str(uuid.uuid4()), task_id=db_task_id, run_id=plan.run_id,
-                            kind="diff", path=_rel_path(diff_path), size=diff_path.stat().st_size,
-                        ))
-
-                    if task.test_command:
-                        test_res = await collect_test_result(sandbox_manager, task.test_command)
-                        test_path = collector.save_json("test_result", test_res)
-                        await store.create_artifact(ArtifactRecord(
-                            id=str(uuid.uuid4()), task_id=db_task_id, run_id=plan.run_id,
-                            kind="test_result", path=_rel_path(test_path), size=test_path.stat().st_size,
-                        ))
-                        await store.update_task(db_task_id, tests_passed=test_res["passed"])
-
-                metadata = {
-                    "run_id": plan.run_id,
-                    "task_id": task.id,
-                    "exit_code": result.exit_code,
-                    "success": result.success,
-                    "harness_type": config.harness.type,
-                }
-                metadata_path = collector.save_json("metadata", metadata)
-                await store.create_artifact(ArtifactRecord(
-                    id=str(uuid.uuid4()), task_id=db_task_id, run_id=plan.run_id,
-                    kind="metadata", path=_rel_path(metadata_path), size=metadata_path.stat().st_size,
-                ))
-
-                await store.update_task(db_task_id, status="completed", exit_code=result.exit_code, success=result.success)
-                await event_bus.emit("task_finished", run_id=plan.run_id, task_id=task.id, success=result.success)
-
-            except Exception as task_e:
-                error_msg = f"Task '{task.id}' ({task.title}): {type(task_e).__name__}: {task_e}"
-                logger.error(error_msg, exc_info=True)
-                print(f"[ERROR] {error_msg}", file=sys.stderr)
-                await store.update_task(
-                    db_task_id, status="failed", error_message=error_msg,
-                    finished_at=datetime.now(timezone.utc).isoformat(),
-                )
-                await event_bus.emit("task_failed", run_id=plan.run_id, task_id=task.id, error=error_msg)
-                task_failed = True
-                break
+        task_failed = any(not r.success for r in results)
 
         if task_failed:
             await store.update_run(plan.run_id, status="failed", success=False, error_message="One or more tasks failed")
             await event_bus.emit("run_failed", run_id=plan.run_id)
         else:
-            all_success = True
-            tasks_db = await store.list_tasks(plan.run_id)
-            for t in tasks_db:
-                if t.success is not True:
-                    all_success = False
-                    break
-            await store.update_run(plan.run_id, status="completed", success=all_success)
-            await event_bus.emit("run_completed", run_id=plan.run_id, success=all_success)
+            await store.update_run(plan.run_id, status="completed", success=True)
+            await event_bus.emit("run_completed", run_id=plan.run_id, success=True)
 
     except Exception as e:
         error_msg = f"{type(e).__name__}: {e}"
@@ -386,15 +314,100 @@ async def _execute_run(config: Config, plan: RunPlan, store: RunStore, dry_run: 
         except Exception:
             logger.warning(f"Failed to remove network {created_network}", exc_info=True)
 
+        if pool:
+            await pool.destroy_all()
+
         await _stop_proxy(proxy_server, proxy_task)
-        if sandbox_manager and config.run.cleanup == CleanupPolicy.always:
-            await sandbox_manager.destroy()
-        elif sandbox_manager and config.run.cleanup == CleanupPolicy.on_failure:
-            run_rec = await store.get_run(plan.run_id)
-            if run_rec and run_rec.success is not True:
-                await sandbox_manager.destroy()
 
     return plan.run_id
+
+
+async def _run_tasks_concurrent(
+    config: Config,
+    plan: RunPlan,
+    store: RunStore,
+    isolation: ContainerIsolation,
+    trace_pipeline: TracePipeline,
+    concurrency: int,
+    event_bus: EventBus,
+    proxy_base_url: Optional[str] = None,
+) -> list[TaskResult]:
+    async def _worker(task) -> TaskResult:
+        worker_store = await RunStore.create_worker()
+        try:
+            task_proxy_base_url = (
+                proxy_base_url_for_task(proxy_base_url, task.id)
+                if proxy_base_url else None
+            )
+            task_harness = _make_harness(
+                config,
+                provider=config.provider,
+                proxy_base_url=task_proxy_base_url,
+            )
+            worker = TaskWorker(task_harness, worker_store, trace_pipeline, plan.run_id)
+            session = await isolation.acquire(task.id)
+            try:
+                await event_bus.emit("task_started", run_id=plan.run_id, task_id=task.id, title=task.title)
+                result = await worker.execute(task, session)
+                await event_bus.emit("task_finished", run_id=plan.run_id, task_id=task.id, success=result.success)
+                return result
+            finally:
+                await isolation.release(session)
+        finally:
+            await worker_store.close()
+
+    tasks = [_worker(task) for task in plan.tasks]
+    gathered = await asyncio.gather(*tasks, return_exceptions=True)
+
+    results: list[TaskResult] = []
+    for item in gathered:
+        if isinstance(item, BaseException):
+            logger.error(f"Unexpected task error: {item}", exc_info=item)
+            results.append(TaskResult("", False, -1, error_message=str(item)))
+        else:
+            results.append(item)
+    return results
+
+
+async def _run_tasks_mock(
+    plan: RunPlan,
+    store: RunStore,
+    event_bus: EventBus,
+) -> list[TaskResult]:
+    from distill_gym.harness.base import MockHarnessAdapter
+
+    mock = MockHarnessAdapter()
+    results: list[TaskResult] = []
+
+    for task in plan.tasks:
+        db_task_id = f"{plan.run_id}_{task.id}"
+        await store.update_task(
+            db_task_id, status="running",
+            started_at=datetime.now(timezone.utc).isoformat(),
+        )
+        await event_bus.emit("task_started", run_id=plan.run_id, task_id=task.id, title=task.title)
+
+        harness_result = await mock.run_task(None, task)  # type: ignore[arg-type]
+
+        collector = ArtifactCollector(plan.run_id, task.id)
+        collector.save_text("stdout", harness_result.stdout)
+        collector.save_text("stderr", harness_result.stderr)
+
+        metadata = {
+            "run_id": plan.run_id,
+            "task_id": task.id,
+            "exit_code": 0,
+            "success": True,
+            "harness_type": "mock",
+        }
+        collector.save_json("metadata", metadata)
+
+        await store.update_task(db_task_id, status="completed", exit_code=0, success=True)
+        await event_bus.emit("task_finished", run_id=plan.run_id, task_id=task.id, success=True)
+
+        results.append(TaskResult(task.id, True, 0))
+
+    return results
 
 
 async def run(config: Config, dry_run: bool = False) -> str:
@@ -406,5 +419,6 @@ async def run(config: Config, dry_run: bool = False) -> str:
 
 
 async def cleanup(label: str = "distill-gym=true") -> dict:
+    from distill_gym.sandbox.manager import SandboxManager
     manager = SandboxManager()
     return await manager.cleanup_resources(label)

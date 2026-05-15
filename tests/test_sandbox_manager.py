@@ -42,37 +42,32 @@ class FakeRuntime(SandboxRuntime):
 
 
 @pytest.mark.asyncio
-async def test_prepare_git_repository_clones_and_runs_setup():
+async def test_start_executes_git_clone_and_setup_steps():
     runtime = FakeRuntime()
     manager = SandboxManager(runtime=runtime)
-    await manager.start(SandboxSpec(image="python:3.12", workdir="/workspace/repo"))
 
-    await manager.prepare_git_repository(
-        SandboxConfig(
-            repo_url="https://github.com/example/test.git",
-            ref="main",
-            use_git_cache=False,
-            workdir="/workspace/repo",
-            setup=["echo setup"],
-        )
+    spec = SandboxSpec(
+        image="python:3.12",
+        workdir="/workspace/repo",
+        steps=[
+            {"type": "git_clone", "args": {"repo": "https://github.com/example/test.git", "ref": "main", "dest": "/workspace/repo", "use_cache": False}},
+            {"type": "run", "args": {"command": "echo setup"}},
+        ],
     )
+    await manager.start(spec)
 
     commands = [call["command"] for call in runtime.exec_calls]
-    prepare_commands = [c for c in commands if c != f"mkdir -p /workspace/repo"]
-    assert "mkdir -p /workspace/repo" in commands[0] or commands[1] == "mkdir -p /workspace/repo"
-    assert "command -v git" in prepare_commands[0]
-    assert prepare_commands[1] == (
-        "git clone --branch main --depth 1 "
-        "https://github.com/example/test.git /workspace/repo"
-    )
-    assert prepare_commands[2] == "echo setup"
+    assert "mkdir -p /workspace/repo" in commands[0]
+    cmd_text = " ".join(commands)
+    assert "command -v git" in cmd_text
+    assert "git clone --branch main --depth 1 https://github.com/example/test.git /workspace/repo" in cmd_text
+    assert "echo setup" in cmd_text
 
 
 @pytest.mark.asyncio
-async def test_prepare_git_repository_uses_host_git_cache(monkeypatch, tmp_path):
+async def test_start_executes_cached_git_clone(monkeypatch, tmp_path):
     runtime = FakeRuntime()
     manager = SandboxManager(runtime=runtime)
-    await manager.start(SandboxSpec(image="python:3.12", workdir="/workspace/repo"))
 
     def fake_clone_from_mirror(repo_url, target, ref="main"):
         target.mkdir(parents=True)
@@ -80,17 +75,18 @@ async def test_prepare_git_repository_uses_host_git_cache(monkeypatch, tmp_path)
 
     monkeypatch.setattr("distill_gym.sandbox.manager.clone_from_mirror", fake_clone_from_mirror)
 
-    await manager.prepare_git_repository(
-        SandboxConfig(
-            repo_url="https://github.com/example/test.git",
-            ref="main",
-            workdir="/workspace/repo",
-            setup=["echo setup"],
-        )
+    spec = SandboxSpec(
+        image="python:3.12",
+        workdir="/workspace/repo",
+        steps=[
+            {"type": "git_clone", "args": {"repo": "https://github.com/example/test.git", "ref": "main", "dest": "/workspace/repo", "use_cache": True}},
+            {"type": "run", "args": {"command": "echo setup"}},
+        ],
     )
+    await manager.start(spec)
 
     commands = [call["command"] for call in runtime.exec_calls]
-    workdir_mkdirs = [c for c in commands if c.startswith("mkdir -p /workspace")]
-    assert any("mkdir -p /workspace" in c for c in workdir_mkdirs)
-    assert "echo setup" in commands
+    assert "mkdir -p /workspace/repo" in commands[0]
+    assert "echo setup" in " ".join(commands)
+    assert len(runtime.copy_to_calls) > 0
     assert runtime.copy_to_calls[0][2] == "/workspace"

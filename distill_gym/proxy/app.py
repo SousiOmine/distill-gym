@@ -41,9 +41,11 @@ class ProxyApp:
             headers["x-request-id"] = request.headers["x-request-id"]
         return headers
 
-    async def chat_completions(self, request: Request) -> Response:
+    async def chat_completions(
+        self, request: Request, path_task_id: str = "",
+    ) -> Response:
         body = await request.json()
-        task_id = request.headers.get("x-task-id", "")
+        task_id = path_task_id or request.headers.get("x-task-id", "")
 
         if self.recorder and self.proxy_cfg.capture_raw_request:
             self.recorder.record_request(body, task_id)
@@ -121,4 +123,9 @@ def create_proxy_app(
     app = FastAPI(lifespan=lifespan)
     app.add_api_route("/health", proxy.health, methods=["GET"])
     app.add_api_route("/v1/chat/completions", proxy.chat_completions, methods=["POST"])
+    app.add_api_route(
+        "/tasks/{path_task_id}/v1/chat/completions",
+        proxy.chat_completions,
+        methods=["POST"],
+    )
     return app

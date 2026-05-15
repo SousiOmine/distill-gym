@@ -31,7 +31,7 @@ async def test_default_harness_commands_are_non_interactive():
     task = TaskItem(id="t1", prompt="fix the tests")
 
     cases = [
-        (CodexHarnessAdapter, "codex exec --json --model test-model 'fix the tests'"),
+        (CodexHarnessAdapter, "OPENAI_BASE_URL=http://proxy.test:5002/v1 OPENAI_API_KEY=distill-gym-proxy codex exec --json --model test-model 'fix the tests'"),
         (OpencodeHarnessAdapter, "OPENCODE_CONFIG_CONTENT='{\"model\": \"openai/test-model\", \"provider\": {\"openai\": {\"options\": {\"baseURL\": \"http://proxy.test:5002/v1\", \"apiKey\": \"distill-gym-proxy\"}}}}' opencode run --format json 'fix the tests' --model openai/test-model"),
         (QwenCodeHarnessAdapter, "QWEN_MODEL=test-model qwen --model test-model --prompt 'fix the tests' --openai-base-url http://proxy.test:5002/v1 --openai-api-key distill-gym-proxy"),
     ]
@@ -95,3 +95,21 @@ async def test_opencode_config_content_is_injected():
     assert "--model openai/test-model" in cmd
     assert "--format json" in cmd
     assert "hello" in cmd and "--format json" in cmd
+
+
+@pytest.mark.asyncio
+async def test_codex_proxy_base_url_is_task_specific_when_provided():
+    task = TaskItem(id="t1", prompt="hello")
+    adapter = CodexHarnessAdapter(
+        HarnessConfig(),
+        provider=SAMPLE_PROVIDER,
+        proxy_base_url="http://proxy.test:5002/tasks/t1/v1",
+    )
+    sandbox = RecordingSandbox()
+
+    await adapter.run_task(sandbox, task)
+
+    assert sandbox.commands[-1].startswith(
+        "OPENAI_BASE_URL=http://proxy.test:5002/tasks/t1/v1 "
+        "OPENAI_API_KEY=distill-gym-proxy codex exec"
+    )

@@ -41,7 +41,6 @@ class CustomSandboxBuilder(SandboxBuilder):
             env=env,
             volumes=volumes,
             network_mode=network_mode,
-            labels={"distill-gym": "true", "distill-gym-builder": "custom"},
-            source_type="custom",
+            labels={"distill-gym": "true"},
             steps=steps,
         )

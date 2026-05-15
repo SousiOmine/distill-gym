@@ -14,6 +14,4 @@ class SandboxBuilder(ABC):
         errors: list[str] = []
         if not config.image:
             errors.append("sandbox.image is required")
-        if getattr(config, 'repo_url', None) and not config.repo_url.startswith(("http://", "https://", "git@", "ssh://")):
-            errors.append(f"sandbox.repo_url has unexpected format: {config.repo_url}")
         return errors

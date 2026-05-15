@@ -41,14 +41,10 @@ class BuildStep(BaseModel):
 
 
 class SandboxConfig(BaseModel):
-    type: str = "git_repository"
+    type: str = "custom"
     engine: SandboxEngine = SandboxEngine.podman
-    repo_url: str = ""
-    ref: str = "main"
-    use_git_cache: bool = True
     image: str = "docker.io/library/python:3.12-bookworm"
-    workdir: str = "/workspace/repo"
-    setup: list[str] = Field(default_factory=list)
+    workdir: str = "/workspace"
     steps: list[BuildStep] = Field(default_factory=list)
     volumes: list[SandboxVolume] = Field(default_factory=list)
     network: SandboxNetwork = Field(default_factory=SandboxNetwork)
@@ -139,6 +135,8 @@ class RunConfig(BaseModel):
     concurrency: int = 1
     timeout_minutes_per_task: int = 30
     cleanup: CleanupPolicy = CleanupPolicy.always
+    repo_url: str = ""
+    ref: str = "main"
 
 
 class Config(BaseModel):

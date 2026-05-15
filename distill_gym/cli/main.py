@@ -74,11 +74,14 @@ def run_repo(
     cfg = Config()
     cfg.run.name = f"{harness}-{Path(repo_url).stem or 'repo'}"
     cfg.run.task_count = task_count
+    cfg.run.repo_url = repo_url
+    cfg.run.ref = ref
     cfg.provider.base_url = provider_base_url.rstrip("/")
     cfg.provider.api_key_env = api_key_env
     cfg.provider.model = model
-    cfg.sandbox.repo_url = repo_url
-    cfg.sandbox.ref = ref
+    cfg.sandbox.steps = [
+        {"type": "git_clone", "args": {"repo": repo_url, "ref": ref, "dest": "/workspace", "use_cache": True}},
+    ]
     cfg.harness.type = harness
 
     try:

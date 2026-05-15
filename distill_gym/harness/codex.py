@@ -23,6 +23,7 @@ class CodexHarnessAdapter(GenericCliHarnessAdapter):
 
     async def run_task(self, sandbox, task) -> HarnessResult:
         model = self.provider.model if self.provider else ""
+        base_url = self.proxy_base_url or ""
 
         if self._has_custom_command:
             command = self.config.run.command.format(**self._build_format_kwargs(task))
@@ -33,6 +34,11 @@ class CodexHarnessAdapter(GenericCliHarnessAdapter):
                 parts.append(f"--model {shlex.quote(model)}")
             parts.append(prompt)
             command = " ".join(parts)
+            if base_url:
+                command = (
+                    f"OPENAI_BASE_URL={shlex.quote(base_url)} "
+                    f"OPENAI_API_KEY=distill-gym-proxy {command}"
+                )
 
         exit_code, stdout, stderr = await self._exec(
             sandbox, command,

@@ -6,6 +6,7 @@ run:
   concurrency: 1
   timeout_minutes_per_task: 5
   cleanup: always
+  repo_url: https://github.com/example/mock.git
 
 provider:
   type: openai_compatible
@@ -25,12 +26,17 @@ logging_proxy:
   normalize_reasoning: false
 
 sandbox:
-  type: git_repository
+  type: custom
   engine: podman
-  repo_url: https://github.com/example/mock.git
-  ref: main
   image: docker.io/library/python:3.12-bookworm
-  workdir: /workspace/repo
+  workdir: /workspace
+  steps:
+    - type: git_clone
+      args:
+        repo: https://github.com/example/mock.git
+        ref: main
+        dest: /workspace
+        use_cache: true
 
 harness:
   type: mock

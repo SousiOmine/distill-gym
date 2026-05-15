@@ -33,28 +33,12 @@ class TestContainerClientInterface:
 class TestSandboxBuilderValidate:
     def test_builder_validate_empty_image(self):
         builder = _TestableBuilder()
-        config = SandboxConfig(repo_url="", image="")
+        config = SandboxConfig(image="")
         errors = builder.validate(config)
         assert any("image" in e for e in errors)
 
-    def test_builder_validate_repo_url_format(self):
-        builder = _TestableBuilder()
-        config = SandboxConfig(repo_url="not-a-url", image="python:3.12")
-        errors = builder.validate(config)
-        assert any("unexpected format" in e for e in errors)
-
     def test_builder_validate_valid_passes(self):
         builder = _TestableBuilder()
-        config = SandboxConfig(
-            repo_url="https://github.com/example/test.git",
-            image="python:3.12",
-        )
+        config = SandboxConfig(image="python:3.12")
         errors = builder.validate(config)
         assert len(errors) == 0
-
-    def test_git_repository_builder_requires_repo_url(self):
-        from distill_gym.sandbox.builders.git_repository import GitRepositorySandboxBuilder
-        builder = GitRepositorySandboxBuilder()
-        config = SandboxConfig(repo_url="", image="python:3.12")
-        errors = builder.validate(config)
-        assert any("repo_url" in e for e in errors)

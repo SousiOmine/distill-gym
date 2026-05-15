@@ -7,18 +7,20 @@ import httpx
 
 from distill_gym.cache.git_cache import clone_from_mirror
 from distill_gym.taskgen.base import TaskGenerator
-from distill_gym.config.schema import TaskItem, TaskGenConfig, SandboxConfig, ProviderConfig
+from distill_gym.config.schema import TaskItem, TaskGenConfig, ProviderConfig
 
 
 class RepoTaskGenerator(TaskGenerator):
     def __init__(
         self,
         config: TaskGenConfig,
-        sandbox_config: SandboxConfig | None = None,
+        repo_url: str = "",
+        ref: str = "main",
         provider_config: ProviderConfig | None = None,
     ):
         self.config = config
-        self.sandbox_config = sandbox_config
+        self.repo_url = repo_url
+        self.ref = ref
         self.provider_config = provider_config
 
     async def generate(self, count: int, run_id: str = "") -> list[TaskItem]:
@@ -42,9 +44,7 @@ class RepoTaskGenerator(TaskGenerator):
         return tasks
 
     async def _generate_with_llm(self, count: int) -> list[TaskItem]:
-        if not self.sandbox_config or not self.provider_config:
-            return []
-        if not self.sandbox_config.repo_url:
+        if not self.repo_url or not self.provider_config:
             return []
         api_key = os.environ.get(self.provider_config.api_key_env, "")
         if not api_key:
@@ -53,7 +53,7 @@ class RepoTaskGenerator(TaskGenerator):
         try:
             with tempfile.TemporaryDirectory(prefix="distill-gym-taskgen-") as td:
                 repo_path = Path(td) / "repo"
-                clone_from_mirror(self.sandbox_config.repo_url, repo_path, self.sandbox_config.ref)
+                clone_from_mirror(self.repo_url, repo_path, self.ref)
                 repo_summary = self._summarize_repo(repo_path)
                 tasks = await self._request_tasks(repo_summary, count, api_key)
                 return tasks

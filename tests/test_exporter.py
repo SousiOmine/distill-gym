@@ -60,7 +60,7 @@ async def test_export_empty_run(mem_store):
             include_reasoning=True, include_tool_results=True, include_failed=False,
         )
         assert count == 1
-        with open(output) as f:
+        with open(output, encoding="utf-8") as f:
             line = json.loads(f.readline())
             assert "messages" in line
             assert "metadata" in line
@@ -116,7 +116,7 @@ async def test_metadata_no_secrets(mem_store):
             run_id=run_id, output=output, store=store,
         )
         assert count == 1
-        with open(output) as f:
+        with open(output, encoding="utf-8") as f:
             line = json.loads(f.readline())
             meta = json.dumps(line["metadata"])
             assert "sk-" not in meta
@@ -182,7 +182,7 @@ async def test_export_multi_turn_conversation(mem_store):
             )
             assert count == 1
 
-            with open(output) as f:
+            with open(output, encoding="utf-8") as f:
                 record = json.loads(f.readline())
                 msgs = record["messages"]
 
@@ -259,7 +259,7 @@ async def test_export_multiple_conversations(mem_store):
             assert count == 2
 
             records = []
-            with open(output) as f:
+            with open(output, encoding="utf-8") as f:
                 for line in f:
                     records.append(json.loads(line))
             assert len(records) == 2
@@ -329,7 +329,7 @@ async def test_export_without_tool_results(mem_store):
             )
             assert count == 1
 
-            with open(output) as f:
+            with open(output, encoding="utf-8") as f:
                 record = json.loads(f.readline())
                 msgs = record["messages"]
 
@@ -410,7 +410,7 @@ async def test_export_with_tools(mem_store):
             )
             assert count == 1
 
-            with open(output) as f:
+            with open(output, encoding="utf-8") as f:
                 record = json.loads(f.readline())
                 assert "tools" in record
                 assert record["tools"] == tools_def
@@ -489,7 +489,7 @@ async def test_export_without_tools_flag(mem_store):
             )
             assert count == 1
 
-            with open(output) as f:
+            with open(output, encoding="utf-8") as f:
                 record = json.loads(f.readline())
                 assert "tools" not in record
         finally:
@@ -665,7 +665,7 @@ async def test_export_triple_turn_conversation(mem_store):
             )
             assert count == 1
 
-            with open(output) as f:
+            with open(output, encoding="utf-8") as f:
                 record = json.loads(f.readline())
                 msgs = record["messages"]
 

@@ -1,4 +1,3 @@
-import json
 from datetime import datetime, timezone
 from typing import Optional
 import aiosqlite
@@ -10,6 +9,11 @@ class RunStore:
     def __init__(self, db: aiosqlite.Connection | None = None):
         self._db = db
         self._owned = db is None
+
+    @classmethod
+    async def create_worker(cls) -> "RunStore":
+        db = await get_db()
+        return cls(db=db)
 
     async def _conn(self) -> aiosqlite.Connection:
         if self._db is None:

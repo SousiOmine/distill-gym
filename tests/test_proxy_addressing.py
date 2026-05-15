@@ -4,6 +4,7 @@ from types import SimpleNamespace
 from distill_gym.config.schema import Config, SandboxEngine
 from distill_gym.platform.detection import PlatformInfo
 from distill_gym.proxy.addressing import (
+    proxy_base_url_for_task,
     proxy_base_url_for_sandbox,
     proxy_connect_host_for_sandbox,
     proxy_listen_host_for_sandbox,
@@ -102,3 +103,17 @@ def test_configured_sandbox_host_overrides_auto_detection():
     config.logging_proxy.sandbox_host = "172.20.16.1"
 
     assert proxy_base_url_for_sandbox(config, _platform("windows")) == "http://172.20.16.1:5002/v1"
+
+
+def test_proxy_base_url_for_task_inserts_task_path_before_v1():
+    assert (
+        proxy_base_url_for_task("http://proxy.test:5002/v1", "task_a")
+        == "http://proxy.test:5002/tasks/task_a/v1"
+    )
+
+
+def test_proxy_base_url_for_task_url_encodes_task_id():
+    assert (
+        proxy_base_url_for_task("http://proxy.test:5002/v1", "task/a b")
+        == "http://proxy.test:5002/tasks/task%2Fa%20b/v1"
+    )

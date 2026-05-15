@@ -13,6 +13,7 @@ run:
   task_count: 1
   concurrency: 1
   cleanup: always
+  repo_url: https://github.com/example/test.git
 provider:
   type: openai_compatible
   name: test
@@ -23,12 +24,11 @@ logging_proxy:
   listen_host: 127.0.0.1
   listen_port: 5002
 sandbox:
-  type: git_repository
+  type: custom
   engine: podman
-  repo_url: https://github.com/example/test.git
-  ref: main
   image: python:3.12
   workdir: /workspace
+  steps: []
 harness:
   type: mock
 taskgen:

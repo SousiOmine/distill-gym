@@ -5,7 +5,6 @@ from pathlib import Path
 from typing import Optional
 
 from distill_gym.sandbox.base import SandboxSpec
-from distill_gym.config.schema import SandboxConfig
 from distill_gym.sandbox.runtime import SandboxRuntime
 from distill_gym.sandbox.runtimes import create_runtime, auto_detect_runtime
 from distill_gym.cache.git_cache import clone_from_mirror
@@ -28,6 +27,7 @@ class SandboxManager:
         self.temp_dir = Path(tempfile.mkdtemp(prefix="distill-gym-"))
         self.workdir = spec.workdir
         await self.runtime.exec(self.container_id, f"mkdir -p {shlex.quote(self.workdir)}", timeout=10, workdir="/")
+        await self.execute_steps(spec)
         return self.container_id
 
     async def exec(
@@ -58,41 +58,6 @@ class SandboxManager:
             raise RuntimeError(f"{context} failed: {detail}")
         return stdout, stderr
 
-    async def prepare_git_repository(self, config: SandboxConfig) -> None:
-        quoted_workdir = shlex.quote(config.workdir)
-        quoted_repo = shlex.quote(config.repo_url)
-        quoted_ref = shlex.quote(config.ref)
-
-        if config.use_git_cache and self.temp_dir:
-            repo_dir_name = posixpath.basename(config.workdir.rstrip("/")) or "repo"
-            repo_parent = posixpath.dirname(config.workdir.rstrip("/")) or "/"
-            host_repo = self.temp_dir / repo_dir_name
-            clone_from_mirror(config.repo_url, host_repo, config.ref)
-            await self.checked_exec(f"mkdir -p {shlex.quote(repo_parent)}", workdir="/", context="create workdir parent")
-            await self.copy_to(str(host_repo), repo_parent)
-            for cmd in config.setup:
-                await self.checked_exec(cmd, timeout=900, context=f"sandbox setup command '{cmd}'")
-            return
-
-        await self.checked_exec(f"mkdir -p {quoted_workdir}", workdir="/", context="create workdir")
-        await self.checked_exec(
-            "command -v git >/dev/null 2>&1 || "
-            "(command -v apt-get >/dev/null 2>&1 && "
-            "apt-get update && apt-get install -y git ca-certificates)",
-            workdir="/",
-            timeout=600,
-            context="install git",
-        )
-        await self.checked_exec(
-            f"git clone --branch {quoted_ref} --depth 1 {quoted_repo} {quoted_workdir}",
-            workdir="/",
-            timeout=900,
-            context="clone repository",
-        )
-
-        for cmd in config.setup:
-            await self.checked_exec(cmd, timeout=900, context=f"sandbox setup command '{cmd}'")
-
     async def execute_steps(self, spec: SandboxSpec) -> None:
         for step in spec.steps:
             step_type = step.get("type", "")
@@ -102,21 +67,34 @@ class SandboxManager:
                 repo = args.get("repo", "")
                 ref = args.get("ref", "main")
                 dest = args.get("dest", self.workdir)
-                quoted_dest = shlex.quote(dest)
-                await self.checked_exec(
-                    f"mkdir -p {shlex.quote(posixpath.dirname(dest))}",
-                    workdir="/", context="create git clone parent",
-                )
-                await self.checked_exec(
-                    "command -v git >/dev/null 2>&1 || "
-                    "(command -v apt-get >/dev/null 2>&1 && "
-                    "apt-get update && apt-get install -y git ca-certificates)",
-                    workdir="/", timeout=600, context="install git",
-                )
-                await self.checked_exec(
-                    f"git clone --branch {shlex.quote(ref)} --depth 1 {shlex.quote(repo)} {quoted_dest}",
-                    workdir="/", timeout=900, context=f"git clone {repo}",
-                )
+                use_cache = args.get("use_cache", False)
+
+                if use_cache and self.temp_dir:
+                    repo_dir_name = posixpath.basename(dest.rstrip("/")) or "repo"
+                    repo_parent = posixpath.dirname(dest.rstrip("/")) or "/"
+                    host_repo = self.temp_dir / repo_dir_name
+                    clone_from_mirror(repo, host_repo, ref)
+                    await self.checked_exec(
+                        f"mkdir -p {shlex.quote(repo_parent)}",
+                        workdir="/", context="create workdir parent",
+                    )
+                    await self.copy_to(str(host_repo), repo_parent)
+                else:
+                    quoted_dest = shlex.quote(dest)
+                    await self.checked_exec(
+                        f"mkdir -p {shlex.quote(posixpath.dirname(dest))}",
+                        workdir="/", context="create git clone parent",
+                    )
+                    await self.checked_exec(
+                        "command -v git >/dev/null 2>&1 || "
+                        "(command -v apt-get >/dev/null 2>&1 && "
+                        "apt-get update && apt-get install -y git ca-certificates)",
+                        workdir="/", timeout=600, context="install git",
+                    )
+                    await self.checked_exec(
+                        f"git clone --branch {shlex.quote(ref)} --depth 1 {shlex.quote(repo)} {quoted_dest}",
+                        workdir="/", timeout=900, context=f"git clone {repo}",
+                    )
 
             elif step_type == "run":
                 command = args.get("command", "")

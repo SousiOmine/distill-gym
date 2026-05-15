@@ -6,6 +6,7 @@ run:
   concurrency: 1
   timeout_minutes_per_task: 30
   cleanup: always
+  repo_url: https://github.com/example/project
 
 provider:
   type: openai_compatible
@@ -26,13 +27,17 @@ logging_proxy:
   normalize_reasoning: true
 
 sandbox:
-  type: git_repository
+  type: custom
   engine: podman
-  repo_url: https://github.com/example/project
-  ref: main
   image: docker.io/library/python:3.12-bookworm
-  workdir: /workspace/repo
-  setup: []
+  workdir: /workspace
+  steps:
+    - type: git_clone
+      args:
+        repo: https://github.com/example/project
+        ref: main
+        dest: /workspace
+        use_cache: true
   network:
     mode: proxy_only
 
