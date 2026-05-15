@@ -21,6 +21,7 @@ async def export_chatml_jsonl(
     store: RunStore,
     include_reasoning: bool = True,
     include_tool_results: bool = True,
+    include_tools: bool = True,
     include_failed: bool = False,
 ) -> int:
     run = await store.get_run(run_id)
@@ -34,10 +35,13 @@ async def export_chatml_jsonl(
             if not include_failed and task.success is not True:
                 continue
             conversations, metadata = await _build_conversation(
-                run, task, store, include_reasoning, include_tool_results,
+                run, task, store, include_reasoning, include_tool_results, include_tools,
             )
-            for conversation in conversations:
+            for conversation, tools in conversations:
                 text = "\n".join(_message_to_chatml(m) for m in conversation)
-                f.write(json.dumps({"text": text, "metadata": metadata}, ensure_ascii=False, default=str) + "\n")
+                record = {"text": text, "metadata": metadata}
+                if include_tools and tools:
+                    record["tools"] = tools
+                f.write(json.dumps(record, ensure_ascii=False, default=str) + "\n")
                 count += 1
     return count

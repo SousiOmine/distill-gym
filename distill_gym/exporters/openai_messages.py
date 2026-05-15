@@ -7,6 +7,8 @@ from distill_gym.proxy.normalizer import normalize_assistant_message, merge_stre
 from distill_gym.storage.run_store import RunStore
 from distill_gym.cache.cache_store import get_artifacts_dir
 
+ConversationWithTools = tuple[list[dict], Optional[list[dict]]]
+
 
 async def export_openai_messages_jsonl(
     run_id: str,
@@ -14,6 +16,7 @@ async def export_openai_messages_jsonl(
     store: RunStore,
     include_reasoning: bool = True,
     include_tool_results: bool = True,
+    include_tools: bool = True,
     include_failed: bool = False,
 ) -> int:
     run = await store.get_run(run_id)
@@ -29,14 +32,16 @@ async def export_openai_messages_jsonl(
                 continue
 
             conversations, metadata = await _build_conversation(
-                run, task, store, include_reasoning, include_tool_results,
+                run, task, store, include_reasoning, include_tool_results, include_tools,
             )
 
-            for conversation in conversations:
+            for conversation, tools in conversations:
                 record = {
                     "messages": conversation,
                     "metadata": metadata,
                 }
+                if include_tools and tools:
+                    record["tools"] = tools
                 f.write(json.dumps(record, ensure_ascii=False, default=str) + "\n")
                 count += 1
 
@@ -45,24 +50,25 @@ async def export_openai_messages_jsonl(
 
 async def _build_conversation(
     run, task, store, include_reasoning: bool, include_tool_results: bool,
-) -> tuple[list[list[dict]], dict]:
+    include_tools: bool = True,
+) -> tuple[list[ConversationWithTools], dict]:
     short_task_id = task.id.removeprefix(f"{run.id}_") if task.id.startswith(f"{run.id}_") else task.id
     raw_trace_path = get_artifacts_dir() / run.id / short_task_id / "raw_trace.jsonl"
 
-    conversations: list[list[dict]] = []
+    conversations: list[ConversationWithTools] = []
 
     if raw_trace_path.exists():
         pairs = _parse_trace_events(raw_trace_path, include_reasoning)
         conv_groups = _group_into_conversations(pairs)
 
         for group in conv_groups:
-            conversation = _reconstruct_conversation(group, include_tool_results, include_reasoning)
+            conversation, conv_tools = _reconstruct_conversation(group, include_tool_results, include_reasoning)
             if conversation:
-                conversations.append(conversation)
+                conversations.append((conversation, conv_tools if include_tools else None))
 
     # Fallback: if no conversations from trace but task has a prompt, create a default
     if not conversations and task and task.prompt:
-        conversations.append([{"role": "user", "content": task.prompt}])
+        conversations.append(([{"role": "user", "content": task.prompt}], None))
 
     artifacts_map = {}
     changed_files = []
@@ -121,9 +127,10 @@ async def _build_conversation(
 
 def _parse_trace_events(
     trace_path: Path, include_reasoning: bool,
-) -> list[tuple[list[dict], dict]]:
-    pairs: list[tuple[list[dict], dict]] = []
+) -> list[tuple[list[dict], Optional[list[dict]], dict]]:
+    pairs: list[tuple[list[dict], Optional[list[dict]], dict]] = []
     curr_request = None
+    curr_tools = None
 
     with open(trace_path, encoding="utf-8") as f:
         for line in f:
@@ -139,6 +146,7 @@ def _parse_trace_events(
 
             if event["event"] == "llm_request":
                 curr_request = data.get("messages", [])
+                curr_tools = data.get("tools")
             elif event["event"] == "llm_response":
                 if curr_request is not None:
                     choices = data.get("choices", [])
@@ -147,25 +155,26 @@ def _parse_trace_events(
                             choices[0], normalize_reasoning=include_reasoning,
                         )
                         if response_msg.get("tool_calls") or response_msg.get("content") or response_msg.get("reasoning_content"):
-                            pairs.append((list(curr_request), response_msg))
+                            pairs.append((list(curr_request), curr_tools, response_msg))
                     curr_request = None
+                    curr_tools = None
 
     return pairs
 
 
 def _group_into_conversations(
-    pairs: list[tuple[list[dict], dict]],
-) -> list[list[tuple[list[dict], dict]]]:
-    groups: list[list[tuple[list[dict], dict]]] = []
-    current: list[tuple[list[dict], dict]] = []
+    pairs: list[tuple[list[dict], Optional[list[dict]], dict]],
+) -> list[list[tuple[list[dict], Optional[list[dict]], dict]]]:
+    groups: list[list[tuple[list[dict], Optional[list[dict]], dict]]] = []
+    current: list[tuple[list[dict], Optional[list[dict]], dict]] = []
 
-    for request_msgs, response in pairs:
+    for request_msgs, tools, response in pairs:
         if current:
             prev_request = current[-1][0]
             if _is_new_conversation(prev_request, request_msgs):
                 groups.append(current)
                 current = []
-        current.append((request_msgs, response))
+        current.append((request_msgs, tools, response))
 
     if current:
         groups.append(current)
@@ -186,17 +195,19 @@ def _is_new_conversation(prev_request: list[dict], curr_request: list[dict]) -> 
 
 
 def _reconstruct_conversation(
-    group: list[tuple[list[dict], dict]],
+    group: list[tuple[list[dict], Optional[list[dict]], dict]],
     include_tool_results: bool,
     include_reasoning: bool,
-) -> list[dict]:
+) -> tuple[list[dict], Optional[list[dict]]]:
     if not group:
-        return []
+        return [], None
 
     last_request_messages = group[-1][0]
-    last_response = group[-1][1]
+    last_response = group[-1][2]
 
-    response_msgs = [pair[1] for pair in group if pair[1] is not None]
+    response_msgs = [pair[2] for pair in group if pair[2] is not None]
+
+    tools = group[0][1]
 
     messages: list[dict] = []
     response_idx = 0
@@ -222,4 +233,4 @@ def _reconstruct_conversation(
             final.pop("reasoning_content", None)
         messages.append(final)
 
-    return messages
+    return messages, tools

@@ -352,6 +352,251 @@ async def test_export_without_tool_results(mem_store):
 
 
 @pytest.mark.asyncio
+async def test_export_with_tools(mem_store):
+    """Tool definitions in trace are exported as a top-level 'tools' field."""
+    store = mem_store
+    run_id = "tools-test"
+    tmpdir = tempfile.mkdtemp()
+    old_env = os.environ.get("DISTILL_GYM_CACHE_DIR")
+    os.environ["DISTILL_GYM_CACHE_DIR"] = tmpdir
+    try:
+        run = RunRecord(
+            id=run_id, name="tools-test", config_yaml="", status="completed",
+            created_at=datetime.now(timezone.utc), updated_at=datetime.now(timezone.utc),
+        )
+        await store.create_run(run)
+        task = TaskRecord(
+            id="tl1", run_id=run_id, title="Tools Task",
+            prompt="test", status="completed", success=True,
+        )
+        await store.create_task(task)
+
+        artifact_dir = get_artifacts_dir() / run_id / "tl1"
+        artifact_dir.mkdir(parents=True, exist_ok=True)
+        trace_path = artifact_dir / "raw_trace.jsonl"
+
+        tools_def = [
+            {"type": "function", "function": {"name": "get_weather", "description": "Get weather", "parameters": {"type": "object", "properties": {"location": {"type": "string"}}}}},
+        ]
+
+        tc1 = {"id": "call_1", "type": "function", "function": {"name": "get_weather", "arguments": "{\"location\": \"Tokyo\"}"}}
+
+        trace_lines = [
+            json.dumps({"event": "llm_request", "data": {"messages": [
+                {"role": "system", "content": "You are helpful."},
+                {"role": "user", "content": "What is the weather in Tokyo?"},
+            ], "tools": tools_def}}),
+            json.dumps({"event": "llm_response", "data": {"choices": [{"message": {
+                "role": "assistant", "content": "",
+                "tool_calls": [tc1],
+            }}]}}),
+            json.dumps({"event": "llm_request", "data": {"messages": [
+                {"role": "system", "content": "You are helpful."},
+                {"role": "user", "content": "What is the weather in Tokyo?"},
+                {"role": "assistant", "content": "", "tool_calls": [tc1]},
+                {"role": "tool", "tool_call_id": "call_1", "content": "Sunny, 25°C"},
+            ], "tools": tools_def}}),
+            json.dumps({"event": "llm_response", "data": {"choices": [{"message": {
+                "role": "assistant", "content": "The weather in Tokyo is sunny at 25°C.",
+            }}]}}),
+        ]
+        trace_path.write_text("\n".join(trace_lines) + "\n", encoding="utf-8")
+
+        output = Path("test_tools.jsonl")
+        try:
+            count = await export_openai_messages_jsonl(
+                run_id=run_id, output=output, store=store,
+                include_reasoning=True, include_tool_results=True, include_tools=True,
+            )
+            assert count == 1
+
+            with open(output) as f:
+                record = json.loads(f.readline())
+                assert "tools" in record
+                assert record["tools"] == tools_def
+                msgs = record["messages"]
+                assert len(msgs) == 5
+                assert msgs[0]["role"] == "system"
+                assert msgs[1]["role"] == "user"
+                assert msgs[2]["role"] == "assistant"
+                assert msgs[2]["tool_calls"] == [tc1]
+                assert msgs[3]["role"] == "tool"
+                assert msgs[4]["role"] == "assistant"
+                assert msgs[4]["content"] == "The weather in Tokyo is sunny at 25°C."
+        finally:
+            if output.exists():
+                output.unlink()
+    finally:
+        if old_env:
+            os.environ["DISTILL_GYM_CACHE_DIR"] = old_env
+        else:
+            os.environ.pop("DISTILL_GYM_CACHE_DIR", None)
+        shutil.rmtree(tmpdir, ignore_errors=True)
+
+
+@pytest.mark.asyncio
+async def test_export_without_tools_flag(mem_store):
+    """include_tools=False prevents tools from appearing in output."""
+    store = mem_store
+    run_id = "no-tools-flag"
+    tmpdir = tempfile.mkdtemp()
+    old_env = os.environ.get("DISTILL_GYM_CACHE_DIR")
+    os.environ["DISTILL_GYM_CACHE_DIR"] = tmpdir
+    try:
+        run = RunRecord(
+            id=run_id, name="no-tools-flag", config_yaml="", status="completed",
+            created_at=datetime.now(timezone.utc), updated_at=datetime.now(timezone.utc),
+        )
+        await store.create_run(run)
+        task = TaskRecord(
+            id="ntf1", run_id=run_id, title="No Tools Flag",
+            prompt="test", status="completed", success=True,
+        )
+        await store.create_task(task)
+
+        artifact_dir = get_artifacts_dir() / run_id / "ntf1"
+        artifact_dir.mkdir(parents=True, exist_ok=True)
+        trace_path = artifact_dir / "raw_trace.jsonl"
+
+        tools_def = [{"type": "function", "function": {"name": "search", "description": "Search", "parameters": {"type": "object", "properties": {"q": {"type": "string"}}}}}]
+        tc1 = {"id": "call_1", "type": "function", "function": {"name": "search", "arguments": "{\"q\": \"hello\"}"}}
+
+        trace_lines = [
+            json.dumps({"event": "llm_request", "data": {"messages": [
+                {"role": "system", "content": "You are helpful."},
+                {"role": "user", "content": "Search for hello"},
+            ], "tools": tools_def}}),
+            json.dumps({"event": "llm_response", "data": {"choices": [{"message": {
+                "role": "assistant", "content": "", "tool_calls": [tc1],
+            }}]}}),
+            json.dumps({"event": "llm_request", "data": {"messages": [
+                {"role": "system", "content": "You are helpful."},
+                {"role": "user", "content": "Search for hello"},
+                {"role": "assistant", "content": "", "tool_calls": [tc1]},
+                {"role": "tool", "tool_call_id": "call_1", "content": "Result: hello world"},
+            ], "tools": tools_def}}),
+            json.dumps({"event": "llm_response", "data": {"choices": [{"message": {
+                "role": "assistant", "content": "The result is hello world.",
+            }}]}}),
+        ]
+        trace_path.write_text("\n".join(trace_lines) + "\n", encoding="utf-8")
+
+        output = Path("test_no_tools_flag.jsonl")
+        try:
+            count = await export_openai_messages_jsonl(
+                run_id=run_id, output=output, store=store,
+                include_tools=False,
+            )
+            assert count == 1
+
+            with open(output) as f:
+                record = json.loads(f.readline())
+                assert "tools" not in record
+        finally:
+            if output.exists():
+                output.unlink()
+    finally:
+        if old_env:
+            os.environ["DISTILL_GYM_CACHE_DIR"] = old_env
+        else:
+            os.environ.pop("DISTILL_GYM_CACHE_DIR", None)
+        shutil.rmtree(tmpdir, ignore_errors=True)
+
+
+@pytest.mark.asyncio
+async def test_export_multiple_conversations_keeps_tools_per_record(mem_store):
+    """Separate conversations in one task keep their own tool definitions."""
+    store = mem_store
+    run_id = "multi-conv-tools-test"
+    tmpdir = tempfile.mkdtemp()
+    old_env = os.environ.get("DISTILL_GYM_CACHE_DIR")
+    os.environ["DISTILL_GYM_CACHE_DIR"] = tmpdir
+    try:
+        run = RunRecord(
+            id=run_id, name="multi-conv-tools", config_yaml="", status="completed",
+            created_at=datetime.now(timezone.utc), updated_at=datetime.now(timezone.utc),
+        )
+        await store.create_run(run)
+        task = TaskRecord(
+            id="mct1", run_id=run_id, title="Multi Conversation Tools",
+            prompt="test", status="completed", success=True,
+        )
+        await store.create_task(task)
+
+        artifact_dir = get_artifacts_dir() / run_id / "mct1"
+        artifact_dir.mkdir(parents=True, exist_ok=True)
+        trace_path = artifact_dir / "raw_trace.jsonl"
+
+        search_tools = [
+            {"type": "function", "function": {"name": "search", "description": "Search", "parameters": {"type": "object"}}},
+        ]
+        weather_tools = [
+            {"type": "function", "function": {"name": "get_weather", "description": "Weather", "parameters": {"type": "object"}}},
+        ]
+        search_call = {"id": "call_search", "type": "function", "function": {"name": "search", "arguments": "{\"q\": \"hello\"}"}}
+        weather_call = {"id": "call_weather", "type": "function", "function": {"name": "get_weather", "arguments": "{\"location\": \"Tokyo\"}"}}
+
+        trace_lines = [
+            json.dumps({"event": "llm_request", "data": {"messages": [
+                {"role": "system", "content": "You are helpful."},
+                {"role": "user", "content": "Search for hello"},
+            ], "tools": search_tools}}),
+            json.dumps({"event": "llm_response", "data": {"choices": [{"message": {
+                "role": "assistant", "content": "", "tool_calls": [search_call],
+            }}]}}),
+            json.dumps({"event": "llm_request", "data": {"messages": [
+                {"role": "system", "content": "You are helpful."},
+                {"role": "user", "content": "Search for hello"},
+                {"role": "assistant", "content": "", "tool_calls": [search_call]},
+                {"role": "tool", "tool_call_id": "call_search", "content": "hello result"},
+            ], "tools": search_tools}}),
+            json.dumps({"event": "llm_response", "data": {"choices": [{"message": {
+                "role": "assistant", "content": "Found hello.",
+            }}]}}),
+            json.dumps({"event": "llm_request", "data": {"messages": [
+                {"role": "system", "content": "You are helpful."},
+                {"role": "user", "content": "Weather in Tokyo?"},
+            ], "tools": weather_tools}}),
+            json.dumps({"event": "llm_response", "data": {"choices": [{"message": {
+                "role": "assistant", "content": "", "tool_calls": [weather_call],
+            }}]}}),
+            json.dumps({"event": "llm_request", "data": {"messages": [
+                {"role": "system", "content": "You are helpful."},
+                {"role": "user", "content": "Weather in Tokyo?"},
+                {"role": "assistant", "content": "", "tool_calls": [weather_call]},
+                {"role": "tool", "tool_call_id": "call_weather", "content": "Sunny"},
+            ], "tools": weather_tools}}),
+            json.dumps({"event": "llm_response", "data": {"choices": [{"message": {
+                "role": "assistant", "content": "Tokyo is sunny.",
+            }}]}}),
+        ]
+        trace_path.write_text("\n".join(trace_lines) + "\n", encoding="utf-8")
+
+        output = Path("test_multi_conv_tools.jsonl")
+        try:
+            count = await export_openai_messages_jsonl(
+                run_id=run_id, output=output, store=store,
+                include_tools=True,
+            )
+            assert count == 2
+
+            records = [json.loads(line) for line in output.read_text(encoding="utf-8").splitlines()]
+            assert records[0]["messages"][1]["content"] == "Search for hello"
+            assert records[0]["tools"] == search_tools
+            assert records[1]["messages"][1]["content"] == "Weather in Tokyo?"
+            assert records[1]["tools"] == weather_tools
+        finally:
+            if output.exists():
+                output.unlink()
+    finally:
+        if old_env:
+            os.environ["DISTILL_GYM_CACHE_DIR"] = old_env
+        else:
+            os.environ.pop("DISTILL_GYM_CACHE_DIR", None)
+        shutil.rmtree(tmpdir, ignore_errors=True)
+
+
+@pytest.mark.asyncio
 async def test_export_triple_turn_conversation(mem_store):
     """Three turns: tool_call → tool result → tool_call → tool result → final answer."""
     store = mem_store

@@ -19,6 +19,7 @@ async def merge_runs_to_jsonl(
     store: RunStore,
     include_reasoning: bool = True,
     include_tool_results: bool = True,
+    include_tools: bool = True,
     include_failed: bool = False,
 ) -> int:
     count = 0
@@ -34,15 +35,17 @@ async def merge_runs_to_jsonl(
                     continue
 
                 conversations, metadata = await _build_conversation(
-                    run, task, store, include_reasoning, include_tool_results,
+                    run, task, store, include_reasoning, include_tool_results, include_tools,
                 )
-                for conversation in conversations:
+                for conversation, tools in conversations:
                     conversation = _ensure_message(conversation, task)
                     record = {
                         "messages": conversation,
                         "metadata": metadata,
                         "source_run_id": run_id,
                     }
+                    if include_tools and tools:
+                        record["tools"] = tools
                     f.write(json.dumps(record, ensure_ascii=False, default=str) + "\n")
                     count += 1
 
@@ -55,6 +58,7 @@ async def merge_runs_to_chatml(
     store: RunStore,
     include_reasoning: bool = True,
     include_tool_results: bool = True,
+    include_tools: bool = True,
     include_failed: bool = False,
 ) -> int:
     from distill_gym.exporters.chatml import _message_to_chatml
@@ -72,9 +76,9 @@ async def merge_runs_to_chatml(
                     continue
 
                 conversations, metadata = await _build_conversation(
-                    run, task, store, include_reasoning, include_tool_results,
+                    run, task, store, include_reasoning, include_tool_results, include_tools,
                 )
-                for conversation in conversations:
+                for conversation, tools in conversations:
                     conversation = _ensure_message(conversation, task)
                     text = "\n".join(_message_to_chatml(m) for m in conversation)
                     record = {
@@ -82,6 +86,8 @@ async def merge_runs_to_chatml(
                         "metadata": metadata,
                         "source_run_id": run_id,
                     }
+                    if include_tools and tools:
+                        record["tools"] = tools
                     f.write(json.dumps(record, ensure_ascii=False, default=str) + "\n")
                     count += 1
 

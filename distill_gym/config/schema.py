@@ -129,6 +129,7 @@ class ExportFormats(BaseModel):
     formats: list[str] = Field(default_factory=lambda: ["openai_messages_jsonl"])
     include_reasoning_content: bool = True
     include_tool_results: bool = True
+    include_tools: bool = True
     include_failed_runs: bool = False
 
 
