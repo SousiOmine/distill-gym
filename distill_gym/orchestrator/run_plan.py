@@ -22,6 +22,13 @@ class RunPlan:
         if config.taskgen.type == "harness":
             return cls(run_id=run_id, config=config, tasks=[])
 
+        if config.taskgen.type == "evolutionary":
+            from distill_gym.taskgen.evolutionary_task_generator import EvolutionaryTaskGenerator
+
+            gen = EvolutionaryTaskGenerator(config.taskgen, provider_config=config.provider)
+            tasks = await gen.generate(config.run.task_count)
+            return cls(run_id=run_id, config=config, tasks=tasks)
+
         gen = RepoTaskGenerator(config.taskgen, repo_url=config.run.repo_url, ref=config.run.ref, provider_config=config.provider)
         tasks = await gen.generate(config.run.task_count)
         return cls(run_id=run_id, config=config, tasks=tasks)

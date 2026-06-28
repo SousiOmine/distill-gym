@@ -106,6 +106,23 @@ class TaskGenPrompt(BaseModel):
     prompt: str
 
 
+class EvolutionaryConfig(BaseModel):
+    seed_tasks: list[TaskItem] = Field(default_factory=list)
+    max_generations: int = Field(default=10, ge=1)
+    population_size: int = Field(default=20, ge=1)
+    mutation_strategies: list[str] = Field(
+        default_factory=lambda: ["extend", "fuse_same_type", "fuse_cross_type", "add_constraint", "combine_concepts"]
+    )
+    difficulty_min: float = Field(default=0.3, ge=0.0, le=1.0)
+    solver_attempts: int = Field(default=3, ge=1)
+    solver_model: str = ""
+    concept_graph_steps: int = Field(default=6, ge=1)
+    archive_capacity: int = Field(default=100, ge=1)
+    temperature: float = Field(default=0.7, ge=0.0, le=2.0)
+    elitism: int = Field(default=2, ge=0)
+    tournament_size: int = Field(default=3, ge=1)
+
+
 class TaskGenConfig(BaseModel):
     type: str = "repo_auto"
     prompt_template: str = "repo_bugfix_and_test_tasks"
@@ -115,6 +132,7 @@ class TaskGenConfig(BaseModel):
     output_file: str = ".distill-gym/taskgen/tasks.json"
     max_rounds: int = Field(default=5, ge=1)
     batch_size: int = Field(default=3, ge=1)
+    evolutionary: EvolutionaryConfig = Field(default_factory=EvolutionaryConfig)
 
 
 class ArtifactConfig(BaseModel):

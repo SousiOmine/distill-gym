@@ -112,6 +112,70 @@ taskgen:
         Write only the JSON array to {output_file}.
 ```
 
+## 進化的タスク生成
+
+`taskgen.type: evolutionary` を指定すると、複数の研究論文に基づく進化的アルゴリズムで高難易度のコーディングタスクを自動生成します。
+
+### 統合されている手法
+
+| 手法 | 論文 | 役割 |
+|------|------|------|
+| 概念グラフ + ランダムウォーク | QueST (arXiv:2510.17715) | シードタスクから概念を抽出し、共起グラフ上の重み付きランダムウォークで新規な概念組み合わせをサンプリング |
+| 多戦略変異 | UniCode (arXiv:2510.17868) | 単一問題拡張・同型融合・異型融合の3つの変異戦略でタスクを難化 |
+| 制約追加変異 | BenchEvolver (arXiv:2606.01286) | 計算量制約・エッジケース・バッチ処理などの制約を追加して難易度を向上 |
+| 概念組み合わせ生成 | QueST (arXiv:2510.17715) | サンプリングされた概念組み合わせから新規タスクを生成 |
+| 経験的難易度推定 | ACES (NeurIPS 2024) | ソルバーモデルでタスクを複数回解き、`1 -成功率` を難易度スコアとする |
+| Quality-Diversity アーカイブ | ACES (NeurIPS 2024) | 概念ニッチごとに最も難しいタスクを保持し、多様性と品質を両立 |
+
+### 進化のサイクル
+
+1. **初期化**: シードタスクから概念を抽出し、概念グラフとQDアーカイブを構築
+2. **世代ループ**（各世代）:
+   - アーカイブからトーナメント選択で親タスクを選択
+   - 概念グラフからランダムウォークで概念組み合わせをサンプリング
+   - 5種類の変異戦略からランダムに選択し、親タスクを難化変異
+   - ソルバーモデルで難易度を推定（`1 - 成功率`）
+   - 難易度が閾値以上のタスクをQDアーカイブに追加
+3. **結果返却**: アーカイブの上位N件を難易度順で返却
+
+### 設定例
+
+完全な設定例は [examples/evolutionary_taskgen.yaml](examples/evolutionary_taskgen.yaml) を参照してください。
+
+```yaml
+taskgen:
+  type: evolutionary
+  evolutionary:
+    seed_tasks:
+      - id: seed_001
+        title: "DP: Longest Increasing Subsequence"
+        prompt: "動的計画法を用いて最長増加部分列の長さを求める関数を実装せよ。"
+    max_generations: 10
+    population_size: 15
+    difficulty_min: 0.4
+    solver_attempts: 3
+    mutation_strategies:
+      - extend
+      - fuse_same_type
+      - fuse_cross_type
+      - add_constraint
+      - combine_concepts
+```
+
+### 主なパラメータ
+
+| パラメータ | デフォルト | 説明 |
+|-----------|-----------|------|
+| `seed_tasks` | `[]` | 進化の起点となるシードタスク |
+| `max_generations` | 10 | 進化の最大世代数 |
+| `population_size` | 20 | 1世代あたりの変異試行数 |
+| `difficulty_min` | 0.3 | アーカイブ追加の難易度閾値 (0.0=易, 1.0=難) |
+| `solver_attempts` | 3 | 難易度推定のソルバー試行回数 |
+| `concept_graph_steps` | 6 | 概念グラフのランダムウォーク歩数 |
+| `archive_capacity` | 100 | QDアーカイブの最大容量 |
+| `temperature` | 0.7 | LLM生成の温度パラメータ |
+| `tournament_size` | 3 | トーナメント選択のサイズ |
+
 ## 必要条件
 
 - **Podman**（Docker も一部制限付きで可）

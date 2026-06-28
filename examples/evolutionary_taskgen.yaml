@@ -1,0 +1,116 @@
+version: 1
+
+run:
+  name: evolutionary_hard_tasks
+  task_count: 5
+  concurrency: 1
+  timeout_minutes_per_task: 30
+  cleanup: always
+  repo_url: https://github.com/example/project
+
+provider:
+  type: openai_compatible
+  name: deepinfra
+  base_url: https://api.deepinfra.com/v1/openai
+  api_key_env: DEEPINFRA_API_KEY
+  model: meta-llama/Llama-3.3-70B-Instruct
+  extra_body: {}
+
+logging_proxy:
+  listen_host: 127.0.0.1
+  listen_port: 5002
+  sandbox_host: auto
+  capture_stream_chunks: true
+  capture_raw_request: true
+  capture_raw_response: true
+  normalize_reasoning: true
+
+sandbox:
+  type: custom
+  engine: podman
+  image: docker.io/library/python:3.12-bookworm
+  workdir: /workspace
+  steps:
+    - type: git_clone
+      args:
+        repo: https://github.com/example/project
+        ref: main
+        dest: /workspace
+        use_cache: true
+  network:
+    mode: proxy_only
+
+harness:
+  type: opencode
+  install:
+    strategy: command
+    commands:
+      - npm install -g opencode-ai
+  run:
+    command: opencode run --format json {task.prompt.shell}
+  completion:
+    success_exit_codes: [0]
+    max_idle_seconds: 600
+
+# 進化的タスク生成: 論文ベースの手法で高難易度コーディングタスクを自動生成
+#
+# 統合されている手法:
+#   - QueST (arXiv:2510.17715): 概念グラフ + ランダムウォークサンプリング
+#   - InfoSynth (arXiv:2601.00575): 遺伝的アルゴリズム + 反復コードフィードバック
+#   - UniCode (arXiv:2510.17868): 多戦略変異（拡張・同型融合・異型融合）
+#   - ACES (NeurIPS 2024): Quality-Diversity アーカイブ + 経験的難易度推定
+#   - BenchEvolver (arXiv:2606.01286): 制約追加による難易度向上
+taskgen:
+  type: evolutionary
+  evolutionary:
+    # シードタスク: 進化の起点となる初期タスク
+    seed_tasks:
+      - id: seed_001
+        title: "DP: Longest Increasing Subsequence"
+        prompt: |
+          動的計画法を用いて最長増加部分列（LIS）の長さを求める関数を実装せよ。
+          入力は整数のリストであり、出力はLISの長さである。
+          O(n log n)の計算量で解けなければならない。
+      - id: seed_002
+        title: "Graph: Shortest Path with Constraints"
+        prompt: |
+          重み付き有向グラフで、特定の辺を必ず経由する最短経路を見つける関数を実装せよ。
+          グラフは隣接リストで与えられ、負の重みはないものとする。
+      - id: seed_003
+        title: "String: Advanced Pattern Matching"
+        prompt: |
+          KMP法を用いて文字列パターンマッチングを実装せよ。
+          さらに、複数パターンの同時マッチングにも対応すること。
+
+    # 進化パラメータ
+    max_generations: 10        # 進化の最大世代数
+    population_size: 15        # 1世代あたりの変異試行数
+    difficulty_min: 0.4        # 難易度の最小閾値 (0.0=易, 1.0=難)
+    solver_attempts: 3         # 難易度推定のソルバー試行回数
+    concept_graph_steps: 6     # 概念グラフのランダムウォーク歩数
+    archive_capacity: 100      # QDアーカイブの最大容量
+    temperature: 0.8           # LLM生成の温度
+    tournament_size: 3         # トーナメント選択のサイズ
+
+    # 使用する変異戦略（5種類すべて）
+    mutation_strategies:
+      - extend              # 単一問題の拡張（UniCode）
+      - fuse_same_type      # 同型融合（UniCode）
+      - fuse_cross_type     # 異型融合（UniCode）
+      - add_constraint      # 制約追加（BenchEvolver）
+      - combine_concepts    # 概念組み合わせ生成（QueST）
+
+artifacts:
+  collect:
+    - git_diff
+    - stdout
+    - stderr
+    - test_results
+    - files_changed
+
+export:
+  formats:
+    - openai_messages_jsonl
+  include_reasoning_content: true
+  include_tool_results: true
+  include_failed_runs: false
